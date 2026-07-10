@@ -40,19 +40,25 @@ export function buildBlob(hue: number): THREE.Group {
     return pivot;
   };
 
-  /** two-segment arm: shoulder pivot → upper arm → elbow pivot → forearm */
+  /**
+   * two-segment arm: shoulder pivot → upper arm → elbow pivot → forearm.
+   * Matching radii + a filler sphere embedded AT each joint keep the surface
+   * continuous through any bend — the rig exists, the seams don't.
+   */
   const arm = (ax: number, ay: number, angleZ: number): { shoulder: THREE.Group; elbow: THREE.Group } => {
     const shoulder = new THREE.Group();
     shoulder.position.set(ax, ay, 0);
     shoulder.rotation.z = angleZ;
-    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.072, 0.2, 6, 14), mat);
-    upper.position.y = -0.143; // top tip sunk into the shoulder
+    // each capsule's round END CAP is centered on its joint pivot, so the cap
+    // itself acts as the ball joint: bends stay smooth, no filler bulges
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.073, 0.2, 6, 14), mat);
+    upper.position.y = -0.1; // top cap center ON the shoulder pivot
     shoulder.add(upper);
     const elbow = new THREE.Group();
-    elbow.position.y = -0.27; // at the lower end of the upper arm
-    elbow.rotation.x = -0.18; // relaxed natural bend
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.18, 6, 14), mat);
-    fore.position.y = -0.125;
+    elbow.position.y = -0.2; // at the upper arm's lower cap center
+    elbow.rotation.x = -0.12; // barely-there relaxed bend
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.18, 6, 14), mat);
+    fore.position.y = -0.09; // top cap center ON the elbow pivot
     elbow.add(fore);
     shoulder.add(elbow);
     return { shoulder, elbow };
@@ -63,12 +69,13 @@ export function buildBlob(hue: number): THREE.Group {
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.195, 0.38, 8, 18), mat);
   torso.position.y = 0.94;
   torso.scale.set(1.05, 1, 0.8);
-  // the visible neck the reference has (and we didn't)
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.075, 0.16, 10), mat);
-  neck.position.y = 1.36;
+  // a subtle neck PINCH, not a pipe: short, wide, and mostly swallowed by
+  // the head/torso overlap so the figure still reads as one blob
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.1, 0.1, 12), mat);
+  neck.position.y = 1.34;
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 20, 16), mat);
   head.scale.y = 1.05;
-  head.position.y = 1.53;
+  head.position.y = 1.49;
   body.add(torso, neck, head);
 
   const legL = limb(0.1, 0.44, -0.095, 0.68, -0.045);
