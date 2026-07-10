@@ -15,6 +15,8 @@
         --ink: #f2efe6;
         --panel: rgba(18, 20, 28, 0.82);
         --accent: #ffd23f;
+        /* one shared inset so every screen-edge element sits on the same frame */
+        --edge: 20px;
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { height: 100%; overflow: hidden; background: #0e1016; }
@@ -27,7 +29,7 @@
 
       /* banner + timer stack: timer always sits BELOW the announcement */
       #topCenter {
-        position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+        position: fixed; top: var(--edge); left: 50%; transform: translateX(-50%);
         display: flex; flex-direction: column; align-items: center; gap: 10px;
         pointer-events: none; z-index: 10;
       }
@@ -54,41 +56,43 @@
       }
 
       #scores {
-        top: 16px; right: 16px; background: var(--panel);
+        top: var(--edge); right: var(--edge); background: var(--panel);
         border-radius: 18px; padding: 20px 26px; font-size: 26px;
         min-width: 260px; display: none;
       }
       #scores .row { display: flex; justify-content: space-between; gap: 24px; line-height: 1.7; }
       #scores .row b { color: var(--accent); }
 
+      /* stun cooldown stacks above the latency meter in the corner column */
       #cooldown {
-        bottom: 20px; right: 20px; background: var(--panel);
+        bottom: calc(var(--edge) + 80px); right: var(--edge); background: var(--panel);
         border-radius: 14px; padding: 16px 22px; font-size: 26px; font-weight: 700;
         display: none;
       }
       #cooldown.ready { color: #7dd87d; }
 
-      /* signal-bars latency meter, above the stun cooldown */
+      /* signal-bars latency meter — same baseline and height as the controls
+         bar across the screen, so the bottom edge reads as one row */
       #netInd {
-        bottom: 88px; right: 20px; background: var(--panel);
-        border-radius: 12px; padding: 12px 16px; display: none;
+        bottom: var(--edge); right: var(--edge); background: var(--panel);
+        border-radius: 14px; padding: 16px 20px; height: 68px; display: none;
         align-items: flex-end; gap: 5px;
       }
       #netInd .b { width: 8px; background: #3a4154; border-radius: 2px; }
-      #netInd .b:nth-child(1) { height: 10px; }
-      #netInd .b:nth-child(2) { height: 17px; }
-      #netInd .b:nth-child(3) { height: 24px; }
-      #netInd .b:nth-child(4) { height: 31px; }
+      #netInd .b:nth-child(1) { height: 12px; }
+      #netInd .b:nth-child(2) { height: 20px; }
+      #netInd .b:nth-child(3) { height: 28px; }
+      #netInd .b:nth-child(4) { height: 36px; }
       #netInd .b.on.good { background: #7dd87d; }
       #netInd .b.on.mid { background: #ffb03f; }
       #netInd .b.on.bad { background: #ff5d5d; }
-      #netInd .ms { font-size: 18px; color: #8892a8; margin-left: 8px; min-width: 62px; text-align: right; }
+      #netInd .ms { font-size: 20px; color: #8892a8; margin-left: 8px; min-width: 66px; text-align: right; }
       #netInd.down .ms { color: #ff5d5d; }
       #netInd.down { animation: netblink 1s ease-in-out infinite; }
       @keyframes netblink { 50% { opacity: 0.45; } }
 
       #fsBtn {
-        position: fixed; top: 16px; left: 16px; z-index: 15;
+        position: fixed; top: var(--edge); left: var(--edge); z-index: 15;
         background: var(--panel); color: var(--ink); border: 1px solid #333a4d;
         border-radius: 12px; padding: 12px 20px; font-size: 24px; font-weight: 700;
         cursor: pointer; pointer-events: auto; font-family: inherit;
@@ -125,9 +129,9 @@
       #charge { height: 100%; width: 0%; background: var(--accent); }
 
       #help {
-        bottom: 20px; left: 20px; background: var(--panel);
+        bottom: var(--edge); left: var(--edge); background: var(--panel);
         border-radius: 14px; padding: 16px 24px; font-size: 24px; opacity: 0.85;
-        line-height: 1.6;
+        height: 68px; line-height: 36px; white-space: nowrap;
       }
       #help b { color: var(--accent); }
 
