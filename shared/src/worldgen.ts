@@ -356,26 +356,29 @@ export function generateWorld(seed: number): World {
   blockers.push({ x: bbq.x, z: bbq.z, r: 2 }, { x: picnic.x, z: picnic.z, r: 3 });
 
   // one prop keep-out circle per solid fixture
+  // prop keep-outs sized to the RENDERED mesh extents + max prop radius, so
+  // scattered decoys can never spawn intersecting a fixture (the swing set
+  // reaches 5.1m from the playground center, a rotated car's corner 2.24m...)
   const zones: { x: number; z: number; r: number }[] = [
-    { x: playground.x, z: playground.z, r: 4 },
+    { x: playground.x, z: playground.z, r: 5.5 },
     { x: hoop.x, z: hoop.z, r: 2 },
-    { x: car.x, z: car.z, r: 2.4 },
-    { x: car2.x, z: car2.z, r: 2.4 },
-    { x: shed.x, z: shed.z, r: 2.4 },
-    { x: shed2.x, z: shed2.z, r: 2.2 },
+    { x: car.x, z: car.z, r: 2.8 },
+    { x: car2.x, z: car2.z, r: 2.8 },
+    { x: shed.x, z: shed.z, r: 2.6 },
+    { x: shed2.x, z: shed2.z, r: 2.6 },
     { x: sandpit.x, z: sandpit.z, r: 1.3 },
-    { x: trampoline.x, z: trampoline.z, r: 2.2 },
-    { x: bbq.x, z: bbq.z, r: 1 },
+    { x: trampoline.x, z: trampoline.z, r: 2.3 },
+    { x: bbq.x, z: bbq.z, r: 1.1 },
     { x: picnic.x, z: picnic.z, r: 1.8 },
     { x: mower.x, z: mower.z, r: 0.9 },
-    { x: playground2.x, z: playground2.z, r: 4 },
+    { x: playground2.x, z: playground2.z, r: 5.5 },
     { x: pond.x, z: pond.z, r: pond.r + 0.5 },
     { x: soccer.x, z: soccer.z, r: 2.2 },
-    { x: doghouse.x, z: doghouse.z, r: 1.3 },
-    { x: birdbath.x, z: birdbath.z, r: 0.7 },
-    { x: clothesline.x, z: clothesline.z, r: 1.6 },
-    { x: veggie.x, z: veggie.z, r: 2 },
-    ...benches.map((b) => ({ x: b.x, z: b.z, r: 1 })),
+    { x: doghouse.x, z: doghouse.z, r: 1.5 },
+    { x: birdbath.x, z: birdbath.z, r: 0.8 },
+    { x: clothesline.x, z: clothesline.z, r: 2.2 },
+    { x: veggie.x, z: veggie.z, r: 2.4 },
+    ...benches.map((b) => ({ x: b.x, z: b.z, r: 1.4 })),
     ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.7 * t.s })),
   ];
 
@@ -443,13 +446,21 @@ export function generateWorld(seed: number): World {
     });
   }
 
-  // Garden beds with flowers.
+  // Garden beds with flowers. Their center bush becomes a solid, so the bed
+  // must clear every fixture zone, hedge and earlier bed by its own radius —
+  // no shrub may spawn intersecting anything else.
   for (let i = 0; i < 11; i++) {
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       const bx = randRange(rng, -HALF + 4, HALF - 4);
       const bz = randRange(rng, -HALF + 4, HALF - 4);
+      const br = randRange(rng, 1.1, 1.9);
       if (!placementValid(world, bx, bz)) continue;
-      world.beds.push({ x: bx, z: bz, r: randRange(rng, 1.1, 1.9), hue: randRange(rng, 0, 360) });
+      const bushR = 0.55 * br;
+      const bushX = bx - br * 0.25; // the solid shrub sits off-center in the bed
+      if (!world.zones.every((zo) => Math.hypot(bushX - zo.x, bz - zo.z) >= zo.r + bushR)) continue;
+      if (!world.hedges.every((hg) => Math.hypot(bushX - hg.x, bz - hg.z) >= 0.5 * hg.s + bushR + 0.2)) continue;
+      if (!world.beds.every((b2) => Math.hypot(bx - b2.x, bz - b2.z) >= br + b2.r + 0.3)) continue;
+      world.beds.push({ x: bx, z: bz, r: br, hue: randRange(rng, 0, 360) });
       break;
     }
   }
@@ -457,8 +468,9 @@ export function generateWorld(seed: number): World {
   // Player-blocking colliders (hedges exist by now; pool/house block as
   // rects). h > 0 = flat standable top you can jump onto / place objects on.
   world.solids = [
-    { x: car.x, z: car.z, r: 1.6, h: 0.95 },
-    { x: car2.x, z: car2.z, r: 1.6, h: 0.95 },
+    // car collider must cover the rotated body's corners (half-diag ~2.05)
+    { x: car.x, z: car.z, r: 2.0, h: 0.95 },
+    { x: car2.x, z: car2.z, r: 2.0, h: 0.95 },
     { x: shed.x, z: shed.z, r: 1.9, h: 0 }, // pitched roof — no standing
     { x: shed2.x, z: shed2.z, r: 1.9, h: 0 },
     { x: pond.x, z: pond.z, r: pond.r, h: 0 }, // no wading
@@ -471,6 +483,8 @@ export function generateWorld(seed: number): World {
     ...benches.map((b) => ({ x: b.x, z: b.z, r: 0.8, h: 0.5 })),
     ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.5 * t.s, h: 0 })),
     ...world.hedges.map((h) => ({ x: h.x, z: h.z, r: 0.5 * h.s, h: 0 })),
+    // garden-bed bushes are chest-high shrubs — players shouldn't stand in them
+    ...world.beds.map((b) => ({ x: b.x - b.r * 0.25, z: b.z, r: 0.55 * b.r, h: 0 })),
   ];
 
   // Spawn safety: with the full collider set known, no spawn point may sit

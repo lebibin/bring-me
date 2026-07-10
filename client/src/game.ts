@@ -364,11 +364,13 @@ export class Game {
       }
 
       // arms: hold pose while carrying > Mario jump (fist punched skyward,
-      // other arm swung down-back) > walk swing / rest
+      // other arm swung down-back) > walk swing / rest. The raised fist goes
+      // UP THROUGH THE FRONT (-2.9 ≡ up, tilted slightly forward) — swinging
+      // it backward made the jumper read as facing the wrong way.
       const carrying = carriers.has(eid);
       const blend = Math.min(1, dt * 14);
       const targetL = carrying ? -1.15 : airborne ? 0.55 : moving ? -swing * 0.6 : 0;
-      const targetR = carrying ? -1.15 : airborne ? 2.95 : moving ? swing * 0.6 : 0;
+      const targetR = carrying ? -1.15 : airborne ? -2.9 : moving ? swing * 0.6 : 0;
       parts.armL.rotation.x += (targetL - parts.armL.rotation.x) * blend;
       parts.armR.rotation.x += (targetR - parts.armR.rotation.x) * blend;
 
