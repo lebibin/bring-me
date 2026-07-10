@@ -48,7 +48,7 @@ export interface BringMeHook {
     scores(): Record<number, number>;
     remotes(): number;
     remotePos(netId: number): { x: number; z: number } | null;
-    start(createSecs?: number, roundSecs?: number): void;
+    start(createSecs?: number, roundSecs?: number, stage?: number): void;
     pick(archetype: string, hue: number, scale: number): void;
     place(): void;
     grab(): void;
@@ -131,7 +131,7 @@ export function installHook(game: Game, net?: NetClient): void {
             scores: () => net.scores,
             remotes: () => game.remotePlayerCount(),
             remotePos: (netId: number) => game.remotePos(netId),
-            start: (createSecs = 90, roundSecs = 120) => net.start({ createSecs, roundSecs }),
+            start: (createSecs = 90, roundSecs = 120, stage = 0) => net.start({ createSecs, roundSecs, stage }),
             pick: (archetype: string, hue: number, scale: number) => net.pickAction(archetype, hue, scale),
             place: () => net.placeAction(),
             grab: () => net.grabAction(),

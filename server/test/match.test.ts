@@ -21,7 +21,7 @@ import {
   toSeek,
 } from "../src/match.ts";
 
-const SETTINGS = { createSecs: 60, roundSecs: 90 };
+const SETTINGS = { createSecs: 60, roundSecs: 90, stage: 0 };
 const NOW = 1_000_000;
 
 function matchWithObjects(seed = 42, ids = [1, 2, 3]) {

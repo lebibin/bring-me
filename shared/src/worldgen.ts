@@ -55,6 +55,8 @@ export interface GardenBed {
 
 export interface World {
   seed: number;
+  /** index into STAGES — picks the visual theme + fixture-count knobs */
+  stage: number;
   props: WorldProp[];
   /** Delivery plaza: jumbotron faces the yard center, NPC stands in front. */
   plaza: { x: number; z: number; facing: number };
@@ -183,8 +185,21 @@ export function placementValid(w: World, x: number, z: number, allowTops = false
   return true;
 }
 
-export function generateWorld(seed: number): World {
+/**
+ * Per-stage fixture counts. Everything a count places goes through the same
+ * blocker/zone/solid machinery, so stages inherit every safety guarantee.
+ * Plaza, NPC, spawns and the edge structures are computed BEFORE any knob is
+ * consumed — they are identical across stages for the same seed.
+ */
+const STAGE_KNOBS = [
+  { trees: 9, beds: 11, benches: 3, clouds: 6 }, // backyard
+  { trees: 13, beds: 8, benches: 5, clouds: 5 }, // city park
+  { trees: 6, beds: 4, benches: 2, clouds: 8 }, // beach cove
+];
+
+export function generateWorld(seed: number, stage = 0): World {
   const rng = mulberry32(seed);
+  const knobs = STAGE_KNOBS[stage] ?? STAGE_KNOBS[0];
 
   // Party plaza (jumbotron + NPC) at the middle of a seeded edge.
   const edge = randInt(rng, 0, 4);
@@ -302,7 +317,7 @@ export function generateWorld(seed: number): World {
   blockers.push({ x: sandpit.x, z: sandpit.z, r: 3.4 });
 
   const trees: { x: number; z: number; s: number }[] = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < knobs.trees; i++) {
     const spot = pickSpot(4.2);
     trees.push({ ...spot, s: randRange(rng, 0.85, 1.4) });
   }
@@ -320,11 +335,10 @@ export function generateWorld(seed: number): World {
   const birdbath = pickSpot(2);
   const clothesline = { ...pickSpot(3.2), rot: randRange(rng, 0, Math.PI * 2) };
   const veggie = { ...pickSpot(3), rot: randRange(rng, 0, Math.PI * 2) };
-  const benches = [
-    { ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) },
-    { ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) },
-    { ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) },
-  ];
+  const benches: { x: number; z: number; rot: number }[] = [];
+  for (let i = 0; i < knobs.benches; i++) {
+    benches.push({ ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) });
+  }
   // doghouse tucked against the house, past the door end
   const doghouse = {
     x: hInfo.wx + hInfo.nx * 4 + hInfo.tx * (houseLat + 14),
@@ -332,7 +346,7 @@ export function generateWorld(seed: number): World {
     rot: Math.atan2(hInfo.nx, hInfo.nz),
   };
   const clouds: { x: number; y: number; z: number; s: number }[] = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < knobs.clouds; i++) {
     clouds.push({
       x: randRange(rng, -HALF, HALF),
       y: randRange(rng, 16, 26),
@@ -384,6 +398,7 @@ export function generateWorld(seed: number): World {
 
   const world: World = {
     seed,
+    stage,
     props: [],
     plaza: { x: px, z: pz, facing },
     npc,
@@ -449,7 +464,7 @@ export function generateWorld(seed: number): World {
   // Garden beds with flowers. Their center bush becomes a solid, so the bed
   // must clear every fixture zone, hedge and earlier bed by its own radius —
   // no shrub may spawn intersecting anything else.
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; i < knobs.beds; i++) {
     for (let attempt = 0; attempt < 20; attempt++) {
       const bx = randRange(rng, -HALF + 4, HALF - 4);
       const bz = randRange(rng, -HALF + 4, HALF - 4);

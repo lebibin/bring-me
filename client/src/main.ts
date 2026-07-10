@@ -47,7 +47,9 @@ function newCode(): string {
 const hashCode = location.hash.match(/^#\/r\/([A-Za-z0-9]{1,12})$/);
 
 if (location.hash === "#/sandbox") {
-  const game = new Game(container, 1234);
+  // ?stage=N previews any stage locally
+  const stage = Number(new URLSearchParams(location.search).get("stage")) || 0;
+  const game = new Game(container, 1234, stage);
   wireInput(game);
   installHook(game);
   startLoop(game);

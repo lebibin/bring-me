@@ -35,6 +35,7 @@ import {
   TICK_MS,
   archetypeIndex,
   clampParams,
+  clampStage,
   clampToMap,
   decodeC2S,
   encode,
@@ -144,6 +145,7 @@ export class BringMeRoom {
   private settings: MatchSettings = {
     createSecs: CREATE_SECS_DEFAULT,
     roundSecs: ROUND_SECS_DEFAULT,
+    stage: 0,
   };
   private totals: RoomTotals = {};
   private resumeTokens: Record<string, { id: number; name: string }> = {};
@@ -165,7 +167,7 @@ export class BringMeRoom {
         this.seed = stored.seed;
         this.nextId = stored.nextId;
         this.hostId = stored.hostId;
-        this.settings = stored.settings;
+        this.settings = { ...stored.settings, stage: clampStage(stored.settings.stage) };
         this.ttlAt = stored.ttlAt;
         this.totals = stored.totals ?? {};
         this.resumeTokens = stored.resumeTokens ?? {};
@@ -192,8 +194,8 @@ export class BringMeRoom {
   }
 
   private world(): World {
-    if (!this.worldCache || this.worldCache.seed !== this.seed) {
-      this.worldCache = generateWorld(this.seed);
+    if (!this.worldCache || this.worldCache.seed !== this.seed || this.worldCache.stage !== this.settings.stage) {
+      this.worldCache = generateWorld(this.seed, this.settings.stage);
     }
     return this.worldCache;
   }
@@ -414,6 +416,7 @@ export class BringMeRoom {
     this.settings = {
       createSecs: clampInt(raw?.createSecs, CREATE_SECS_MIN, CREATE_SECS_MAX, CREATE_SECS_DEFAULT),
       roundSecs: clampInt(raw?.roundSecs, ROUND_SECS_MIN, ROUND_SECS_MAX, ROUND_SECS_DEFAULT),
+      stage: clampStage(raw?.stage),
     };
     const now = Date.now();
     this.match = newMatch(this.seed, this.settings, [...this.players.keys()], now);
@@ -422,6 +425,9 @@ export class BringMeRoom {
     this.picks.clear();
     this.persist();
     this.persistMatch();
+    // settings first: clients must learn the (possibly new) stage and rebuild
+    // the world BEFORE the CREATE phase drops them into it
+    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
     this.broadcast({ type: "phase", name: "CREATE", endsAt: this.match.phaseEndsAt });
     this.ensureTick();
     await this.scheduleAlarm();

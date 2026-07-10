@@ -4,7 +4,7 @@
 //      born into a walled-off pocket.
 // Usage: node server/test/worldcheck.mjs [seedCount]   (exit 0 = pass)
 
-import { generateWorld, blockedAt, MAP_SIZE } from "../../shared/src/index.ts";
+import { generateWorld, blockedAt, MAP_SIZE, STAGES } from "../../shared/src/index.ts";
 
 const SEEDS = Number(process.argv[2]) || 120;
 const CELL = 0.5;
@@ -44,36 +44,39 @@ function reachable(world, fromX, fromZ) {
 let failures = 0;
 for (let s = 1; s <= SEEDS; s++) {
   const seed = (s * 2654435761) >>> 0;
-  const w = generateWorld(seed);
-  // no two solid fixtures may overlap (objects spawning inside each other)
-  for (let i = 0; i < w.solids.length; i++) {
-    for (let j = i + 1; j < w.solids.length; j++) {
-      const a = w.solids[i];
-      const b = w.solids[j];
-      const d = Math.hypot(a.x - b.x, a.z - b.z);
-      if (d < a.r + b.r - 0.05) {
-        console.error(`FAIL seed ${seed}: solids ${i} and ${j} overlap by ${(a.r + b.r - d).toFixed(2)}m`);
-        failures++;
+  for (let stage = 0; stage < STAGES.length; stage++) {
+    const w = generateWorld(seed, stage);
+    const tag = `seed ${seed} stage ${STAGES[stage].id}`;
+    // no two solid fixtures may overlap (objects spawning inside each other)
+    for (let i = 0; i < w.solids.length; i++) {
+      for (let j = i + 1; j < w.solids.length; j++) {
+        const a = w.solids[i];
+        const b = w.solids[j];
+        const d = Math.hypot(a.x - b.x, a.z - b.z);
+        if (d < a.r + b.r - 0.05) {
+          console.error(`FAIL ${tag}: solids ${i} and ${j} overlap by ${(a.r + b.r - d).toFixed(2)}m`);
+          failures++;
+        }
       }
     }
-  }
-  const region = reachable(w, w.npc.x, w.npc.z);
-  for (let i = 0; i < w.spawnPoints.length; i++) {
-    const sp = w.spawnPoints[i];
-    if (blockedAt(w, sp.x, sp.z, 0.25)) {
-      console.error(`FAIL seed ${seed}: spawn ${i} inside a collider at ${sp.x.toFixed(1)},${sp.z.toFixed(1)}`);
-      failures++;
-    }
-    if (!region.has(cellOf(sp.z) * N + cellOf(sp.x))) {
-      console.error(`FAIL seed ${seed}: spawn ${i} cannot reach the NPC (pocketed) at ${sp.x.toFixed(1)},${sp.z.toFixed(1)}`);
-      failures++;
+    const region = reachable(w, w.npc.x, w.npc.z);
+    for (let i = 0; i < w.spawnPoints.length; i++) {
+      const sp = w.spawnPoints[i];
+      if (blockedAt(w, sp.x, sp.z, 0.25)) {
+        console.error(`FAIL ${tag}: spawn ${i} inside a collider at ${sp.x.toFixed(1)},${sp.z.toFixed(1)}`);
+        failures++;
+      }
+      if (!region.has(cellOf(sp.z) * N + cellOf(sp.x))) {
+        console.error(`FAIL ${tag}: spawn ${i} cannot reach the NPC (pocketed) at ${sp.x.toFixed(1)},${sp.z.toFixed(1)}`);
+        failures++;
+      }
     }
   }
 }
 
 if (failures) {
-  console.error(`\n${failures} failure(s) across ${SEEDS} seeds`);
+  console.error(`\n${failures} failure(s) across ${SEEDS} seeds x ${STAGES.length} stages`);
   process.exit(1);
 }
-console.log(`worldcheck: ${SEEDS} seeds — spawns clear, all reach the NPC, no overlapping solids`);
+console.log(`worldcheck: ${SEEDS} seeds x ${STAGES.length} stages — spawns clear, all reach the NPC, no overlapping solids`);
 process.exit(0);

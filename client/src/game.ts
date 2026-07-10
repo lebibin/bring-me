@@ -28,7 +28,7 @@ import {
   type NetProp,
   type World,
 } from "@bringme/shared";
-import { createScene, buildStatics, type SceneCtx } from "./render/scene.ts";
+import { createScene, buildStatics, disposeStatics, type SceneCtx } from "./render/scene.ts";
 import { buildPropMesh } from "./render/propMeshes.ts";
 import { snapshotProp } from "./render/propShot.ts";
 import { buildBlob, type BlobParts } from "./render/blob.ts";
@@ -57,7 +57,9 @@ import { announce, announceTarget, clearAnnounce, setCharge, setTimer, toast } f
 export type LocalPhase = "IDLE" | "COUNTDOWN" | "REVEAL" | "SEEK" | "WIN";
 
 export class Game {
-  readonly data: World;
+  data: World;
+  readonly seed: number;
+  stage: number;
   readonly ctx: SceneCtx;
   readonly jumbotron: Jumbotron;
   readonly propEidById = new Map<number, number>();
@@ -84,22 +86,20 @@ export class Game {
   private targetEid = 0;
   private npcObj: THREE.Object3D;
   private npcArrow!: THREE.Group;
+  private staticsGroup: THREE.Group;
 
-  constructor(container: HTMLElement, seed: number) {
-    this.data = generateWorld(seed);
+  constructor(container: HTMLElement, seed: number, stage = 0) {
+    this.seed = seed;
+    this.stage = stage;
+    this.data = generateWorld(seed, stage);
     setSimWorld(this.data); // movement collides with the world's solid fixtures
     this.ctx = createScene(container);
-    buildStatics(this.ctx.scene, this.data);
+    this.staticsGroup = buildStatics(this.ctx.scene, this.data);
 
     this.jumbotron = new Jumbotron(this.data);
     this.ctx.scene.add(this.jumbotron.group);
 
-    for (const p of this.data.props) {
-      const mesh = buildPropMesh(p.archetype, p.hue, p.scale);
-      this.ctx.scene.add(mesh);
-      const eid = spawnProp(p.propId, p.archetype, p.x, PROP_REST_Y * p.scale, p.z, p.rotY, mesh);
-      this.propEidById.set(p.propId, eid);
-    }
+    this.spawnScatterProps();
 
     this.npcObj = buildBlob(45);
     this.ctx.scene.add(this.npcObj);
@@ -123,6 +123,40 @@ export class Game {
     this.ctx.scene.add(blob);
     this.playerEid = spawnPlayer(spawn.x, spawn.z, this.data.plaza.facing, 1, true, blob);
     input.camYaw = this.data.plaza.facing;
+  }
+
+  private spawnScatterProps(): void {
+    for (const p of this.data.props) {
+      const mesh = buildPropMesh(p.archetype, p.hue, p.scale);
+      this.ctx.scene.add(mesh);
+      const eid = spawnProp(p.propId, p.archetype, p.x, PROP_REST_Y * p.scale, p.z, p.rotY, mesh);
+      this.propEidById.set(p.propId, eid);
+    }
+  }
+
+  /**
+   * Swap the world to another stage (same seed): rebuild statics and the
+   * decoy scatter. Plaza/NPC/spawns are seed-derived BEFORE any stage knob,
+   * so they stay put — the jumbotron and NPC never move. Anyone left
+   * standing inside a new solid walks out via the stepMove escape valve.
+   */
+  setStage(stage: number): void {
+    if (stage === this.stage) return;
+    this.stage = stage;
+    this.data = generateWorld(this.seed, stage);
+    setSimWorld(this.data);
+    disposeStatics(this.ctx.scene, this.staticsGroup);
+    this.staticsGroup = buildStatics(this.ctx.scene, this.data);
+    // every prop entity goes — the old scatter AND created leftovers from
+    // the previous match; the new stage's scatter replaces them
+    for (const eid of this.propEidById.values()) {
+      const obj = object3ds.get(eid);
+      if (obj) this.ctx.scene.remove(obj);
+      object3ds.delete(eid);
+      removeEntity(world, eid);
+    }
+    this.propEidById.clear();
+    this.spawnScatterProps();
   }
 
   /** One deterministic sim step — no rendering, drivable headlessly. */

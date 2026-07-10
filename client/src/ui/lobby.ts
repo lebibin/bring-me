@@ -7,6 +7,8 @@ import {
   ROUND_SECS_DEFAULT,
   ROUND_SECS_MAX,
   ROUND_SECS_MIN,
+  STAGES,
+  clampStage,
   type MatchSettings,
   type PlayerInfo,
   type RoomTotals,
@@ -26,6 +28,7 @@ export class LobbyUI {
   private startBtn: HTMLButtonElement | null = null;
   private createInput: HTMLInputElement | null = null;
   private roundInput: HTMLInputElement | null = null;
+  private stageVal = 0;
 
   constructor(private readonly handlers: LobbyHandlers) {
     this.root = document.getElementById("lobby") as HTMLDivElement;
@@ -72,6 +75,12 @@ export class LobbyUI {
             <input id="lb-round" type="number" min="${ROUND_SECS_MIN}" max="${ROUND_SECS_MAX}" value="${settings.roundSecs}" ${isHost ? "" : "disabled"} />
           </label>
         </div>
+        <div class="stageRow">
+          <span class="stageLabel">stage</span>
+          <div class="stages" id="lb-stages">
+            ${STAGES.map((s, i) => `<button class="stageBtn" data-stage="${i}" ${isHost ? "" : "disabled"}>${s.name}</button>`).join("")}
+          </div>
+        </div>
         <button id="lb-start" disabled>…</button>
         <div id="lb-status" class="status"></div>
       </div>
@@ -82,6 +91,11 @@ export class LobbyUI {
     this.startBtn = this.root.querySelector("#lb-start");
     this.createInput = this.root.querySelector("#lb-create");
     this.roundInput = this.root.querySelector("#lb-round");
+    this.stageVal = clampStage(settings.stage);
+    this.root.querySelectorAll<HTMLButtonElement>(".stageBtn").forEach((btn) => {
+      btn.addEventListener("click", () => this.setStageSel(Number(btn.dataset["stage"])));
+    });
+    this.markStage();
 
     const copyBtn = this.root.querySelector<HTMLButtonElement>("#lb-copy");
     let copyTimer = 0;
@@ -107,8 +121,24 @@ export class LobbyUI {
   updatePlayers(players: PlayerInfo[], isHost: boolean, settings: MatchSettings): void {
     this.renderPlayers(players);
     this.refreshStart(players, isHost);
+    // host can migrate mid-lobby (original host left) — controls must follow
+    if (this.createInput) this.createInput.disabled = !isHost;
+    if (this.roundInput) this.roundInput.disabled = !isHost;
+    this.root.querySelectorAll<HTMLButtonElement>(".stageBtn").forEach((b) => (b.disabled = !isHost));
     if (this.createInput && !isHost) this.createInput.value = String(settings.createSecs);
     if (this.roundInput && !isHost) this.roundInput.value = String(settings.roundSecs);
+    if (!isHost) this.setStageSel(clampStage(settings.stage));
+  }
+
+  private setStageSel(stage: number): void {
+    this.stageVal = clampStage(stage);
+    this.markStage();
+  }
+
+  private markStage(): void {
+    this.root.querySelectorAll<HTMLButtonElement>(".stageBtn").forEach((btn) => {
+      btn.classList.toggle("sel", Number(btn.dataset["stage"]) === this.stageVal);
+    });
   }
 
   /** Start needs a host AND someone to play against. */
@@ -127,6 +157,7 @@ export class LobbyUI {
     return {
       createSecs: Number(this.createInput?.value) || CREATE_SECS_DEFAULT,
       roundSecs: Number(this.roundInput?.value) || ROUND_SECS_DEFAULT,
+      stage: this.stageVal,
     };
   }
 

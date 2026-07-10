@@ -97,7 +97,7 @@ function stripeTexture(a: string, b: string, stripes: number, repeat: number): T
 }
 
 /** Group positioned/rotated so local +z points inward from wall edge e. */
-function edgeGroup(scene: THREE.Scene, x: number, z: number, e: number): THREE.Group {
+function edgeGroup(scene: THREE.Object3D, x: number, z: number, e: number): THREE.Group {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
   g.rotation.y = [0, -Math.PI / 2, Math.PI, Math.PI / 2][e];
@@ -105,48 +105,124 @@ function edgeGroup(scene: THREE.Scene, x: number, z: number, e: number): THREE.G
   return g;
 }
 
-// ---------- statics ----------
+// ---------- stage themes ----------
 
-/** The backyard: lawn, picket fence, house + deck + pool, playground, hoop, hedges, beds. */
-export function buildStatics(scene: THREE.Scene, world: World): void {
-  buildLawn(scene);
-  buildFences(scene);
-  buildHouse(scene, world);
-  buildDeck(scene, world);
-  buildPool(scene, world.pool);
-  buildPlayground(scene, world.playground, { frame: 0xd94f3d, bar: 0xf3c13a, seat: 0x3a72b0 });
-  buildPlayground(scene, world.playground2, { frame: 0x2a9d8f, bar: 0xe76f51, seat: 0x8859b6 });
-  buildHoop(scene, world);
-  buildDriveway(scene, world);
-  buildCar(scene, world.car);
-  buildCar(scene, world.car2);
-  buildShed(scene, world.shed, 0x8d6b48, 0x5a4a3a);
-  buildShed(scene, world.shed2, 0x7189a8, 0x3d4450);
-  buildSandpit(scene, world.sandpit);
-  buildTrampoline(scene, world.trampoline);
-  buildBbq(scene, world.bbq);
-  buildPicnicTable(scene, world.picnic);
-  buildMower(scene, world.mower);
-  buildPond(scene, world.pond);
-  buildSoccerGoal(scene, world.soccer);
-  buildDoghouse(scene, world.doghouse);
-  buildBirdbath(scene, world.birdbath);
-  buildClothesline(scene, world.clothesline);
-  buildVeggieGarden(scene, world.veggie);
-  for (const b of world.benches) buildBench(scene, b);
-  for (const c of world.clouds) buildCloud(scene, c);
-  world.trees.forEach((t, i) => buildTree(scene, t.x, t.z, t.s, i === 0));
-  for (const h of world.hedges) buildHedge(scene, h.x, h.z, h.s);
-  for (const b of world.beds) buildBed(scene, b.x, b.z, b.r, b.hue);
-
-  // concrete party patio under the jumbotron
-  const pad = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.1, 22), flat(0xb9b2a4));
-  pad.position.set(world.plaza.x, 0.05, world.plaza.z);
-  scene.add(pad);
+interface StageTheme {
+  sky: number;
+  groundA: string;
+  groundB: string;
+  fence: number;
+  deckA: string;
+  deckB: string;
+  driveway: number;
+  poolStyle: "pool" | "pond";
+  poolWater: number;
+  poolTrim: number;
+  pondWater: number;
+  treeKind: "oak" | "autumn" | "palm";
+  hedgeKind: "cypress" | "round" | "rock";
+  houseKind: "house" | "pavilion" | "beachclub";
+  bedKind: "flowers" | "seagrass";
+  plazaPad: number;
 }
 
-function buildLawn(scene: THREE.Scene): void {
-  const tex = stripeTexture("#6da24e", "#77ad55", 8, 7);
+/** Indexed by World.stage — see shared STAGES for the roster. */
+const THEMES: StageTheme[] = [
+  {
+    // backyard — the original suburban look
+    sky: 0x8fc3e8, groundA: "#6da24e", groundB: "#77ad55", fence: 0xf4f1e8,
+    deckA: "#8a5c34", deckB: "#7c5230", driveway: 0xa8a49a,
+    poolStyle: "pool", poolWater: 0x3fa8d8, poolTrim: 0xe8e2d2, pondWater: 0x3583b8,
+    treeKind: "oak", hedgeKind: "cypress", houseKind: "house", bedKind: "flowers",
+    plazaPad: 0xb9b2a4,
+  },
+  {
+    // city park — deep greens, golden late-afternoon haze, public furniture
+    sky: 0xf0c98f, groundA: "#4e8a45", groundB: "#579551", fence: 0x2e5744,
+    deckA: "#5d4630", deckB: "#523d2a", driveway: 0x9a9484,
+    poolStyle: "pond", poolWater: 0x4a7d5f, poolTrim: 0xa8a293, pondWater: 0x46785e,
+    treeKind: "autumn", hedgeKind: "round", houseKind: "pavilion", bedKind: "flowers",
+    plazaPad: 0xa8a191,
+  },
+  {
+    // beach cove — sand underfoot, teal water, driftwood and palms
+    sky: 0x9fd9ea, groundA: "#e6d6a3", groundB: "#dfcc96", fence: 0xc9bda6,
+    deckA: "#c4b394", deckB: "#b8a687", driveway: 0xcfc2a5,
+    poolStyle: "pool", poolWater: 0x2ec4d6, poolTrim: 0xf0ece0, pondWater: 0x2fa8c0,
+    treeKind: "palm", hedgeKind: "rock", houseKind: "beachclub", bedKind: "seagrass",
+    plazaPad: 0xd8cbaa,
+  },
+];
+
+// ---------- statics ----------
+
+/**
+ * Build every static fixture for the world's stage into ONE group and return
+ * it — a stage switch removes the group and rebuilds. Also tints the sky/fog.
+ */
+export function buildStatics(scene: THREE.Scene, world: World): THREE.Group {
+  const t = THEMES[world.stage] ?? THEMES[0];
+  scene.background = new THREE.Color(t.sky);
+  scene.fog = new THREE.Fog(t.sky, 34, 85);
+  const root = new THREE.Group();
+  scene.add(root);
+
+  buildLawn(root, t);
+  buildFences(root, t);
+  if (t.houseKind === "house") buildHouse(root, world);
+  else if (t.houseKind === "pavilion") buildPavilion(root, world);
+  else buildBeachClub(root, world);
+  buildDeck(root, world, t);
+  buildPool(root, world.pool, t);
+  buildPlayground(root, world.playground, { frame: 0xd94f3d, bar: 0xf3c13a, seat: 0x3a72b0 });
+  buildPlayground(root, world.playground2, { frame: 0x2a9d8f, bar: 0xe76f51, seat: 0x8859b6 });
+  buildHoop(root, world);
+  buildDriveway(root, world, t);
+  buildCar(root, world.car);
+  buildCar(root, world.car2);
+  buildShed(root, world.shed, 0x8d6b48, 0x5a4a3a);
+  buildShed(root, world.shed2, 0x7189a8, 0x3d4450);
+  buildSandpit(root, world.sandpit);
+  buildTrampoline(root, world.trampoline);
+  buildBbq(root, world.bbq);
+  buildPicnicTable(root, world.picnic);
+  buildMower(root, world.mower);
+  buildPond(root, world.pond, t);
+  buildSoccerGoal(root, world.soccer);
+  buildDoghouse(root, world.doghouse);
+  buildBirdbath(root, world.birdbath);
+  buildClothesline(root, world.clothesline);
+  buildVeggieGarden(root, world.veggie);
+  for (const b of world.benches) buildBench(root, b);
+  for (const c of world.clouds) buildCloud(root, c);
+  world.trees.forEach((tr, i) => buildTree(root, tr.x, tr.z, tr.s, i === 0 && t.treeKind === "oak", t.treeKind));
+  for (const h of world.hedges) buildHedge(root, h.x, h.z, h.s, t.hedgeKind);
+  for (const b of world.beds) buildBed(root, b.x, b.z, b.r, b.hue, t.bedKind);
+
+  // party patio under the jumbotron
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.1, 22), flat(t.plazaPad));
+  pad.position.set(world.plaza.x, 0.05, world.plaza.z);
+  root.add(pad);
+  return root;
+}
+
+/** Remove a statics group and free its geometries/materials/textures. */
+export function disposeStatics(scene: THREE.Object3D, root: THREE.Group): void {
+  scene.remove(root);
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+    for (const m of mats) {
+      const std = m as THREE.MeshStandardMaterial;
+      if (std.map) std.map.dispose();
+      m.dispose();
+    }
+  });
+}
+
+function buildLawn(scene: THREE.Object3D, t: StageTheme): void {
+  const tex = stripeTexture(t.groundA, t.groundB, 8, 7);
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
     new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }),
@@ -155,8 +231,8 @@ function buildLawn(scene: THREE.Scene): void {
   scene.add(ground);
 }
 
-function buildFences(scene: THREE.Scene): void {
-  const white = flat(0xf4f1e8);
+function buildFences(scene: THREE.Object3D, t: StageTheme): void {
+  const white = flat(t.fence);
   // pickets as one instanced mesh (~700 instances, one draw call)
   const picket = new THREE.BoxGeometry(0.16, 1.0, 0.05);
   const step = 0.34;
@@ -196,7 +272,7 @@ function buildFences(scene: THREE.Scene): void {
   }
 }
 
-function buildHouse(scene: THREE.Scene, world: World): void {
+function buildHouse(scene: THREE.Object3D, world: World): void {
   const g = edgeGroup(scene, world.house.x, world.house.z, world.houseEdge);
   const siding = flat(0x6e86a3);
   const trim = flat(0xf5f2ea);
@@ -219,9 +295,75 @@ function buildHouse(scene: THREE.Scene, world: World): void {
   }
 }
 
-function buildDeck(scene: THREE.Scene, world: World): void {
+/** Park stage: a long public pavilion on the house's exact footprint. */
+function buildPavilion(scene: THREE.Object3D, world: World): void {
+  const g = edgeGroup(scene, world.house.x, world.house.z, world.houseEdge);
+  const stone = flat(0xb0a894);
+  const timber = flat(0x6b4f33);
+  // low stone wall along the back + raised floor (the rect blocks players)
+  box(g, 26, 0.35, 2.4, stone, 0, 0.17, 0);
+  box(g, 26, 1.1, 0.5, stone, 0, 0.9, -0.95);
+  // timber pillars + green hipped roof
+  for (const px of [-12, -7.2, -2.4, 2.4, 7.2, 12]) {
+    box(g, 0.34, 3.2, 0.34, timber, px, 1.95, 0.85);
+    box(g, 0.34, 3.2, 0.34, timber, px, 1.95, -0.85);
+  }
+  box(g, 27, 0.28, 3.8, flat(0x3e6b48), 0, 3.7, 0);
+  const ridge = box(g, 27.4, 0.22, 2.2, flat(0x35593d), 0, 4.05, 0);
+  ridge.rotation.x = 0;
+  // noticeboard + planters facing the lawn
+  box(g, 2.4, 1.4, 0.14, timber, -4.8, 1.7, 1.15);
+  box(g, 2.1, 1.1, 0.06, flat(0xe8e0cc), -4.8, 1.72, 1.23);
+  for (const px of [-11, 11]) {
+    box(g, 1.1, 0.6, 0.9, flat(0x7a5b3a), px, 0.65, 1.1);
+    const bloom = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 6), flat(0xc95d78));
+    bloom.position.set(px, 1.15, 1.1);
+    bloom.scale.y = 0.7;
+    g.add(bloom);
+  }
+}
+
+/** Beach stage: a weathered beach club on the house's exact footprint. */
+function buildBeachClub(scene: THREE.Object3D, world: World): void {
+  const g = edgeGroup(scene, world.house.x, world.house.z, world.houseEdge);
+  const wood = flat(0x8fb8c8);
+  const trim = flat(0xf0ece0);
+  box(g, 26, 3.6, 2.4, wood, 0, 1.8, 0);
+  // white trim bands + flat roof with a driftwood fascia
+  box(g, 26.2, 0.2, 2.6, trim, 0, 3.7, 0);
+  box(g, 26.4, 0.35, 2.8, flat(0xc9bda6), 0, 3.95, 0);
+  // porthole windows + double door
+  for (const wx of [-8.5, -4.5, 4.5, 8.5]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.1, 8, 16), trim);
+    ring.position.set(wx, 2.1, 1.22);
+    g.add(ring);
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.08, 14), flat(0x7fd4e0));
+    glass.rotation.x = Math.PI / 2;
+    glass.position.set(wx, 2.1, 1.22);
+    g.add(glass);
+  }
+  box(g, 2.2, 2.5, 0.12, trim, 0.6, 1.25, 1.22);
+  box(g, 0.1, 2.3, 0.16, flat(0x8fb8c8), 0.6, 1.25, 1.26);
+  // surfboards leaning on the wall
+  for (const [bx, hue] of [[-11.4, 0.02], [-10.6, 0.55], [11, 0.33]] as const) {
+    const board = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.32, 1.9, 4, 8),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue, 0.65, 0.55), flatShading: true, roughness: 0.6 }),
+    );
+    board.position.set(bx, 1.4, 1.28);
+    board.rotation.x = -0.18;
+    board.scale.z = 0.28;
+    g.add(board);
+  }
+  // lifebuoy by the door
+  const buoy = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.12, 8, 16), flat(0xd94f3d));
+  buoy.position.set(3.2, 2.4, 1.24);
+  g.add(buoy);
+}
+
+function buildDeck(scene: THREE.Object3D, world: World, t: StageTheme): void {
   const g = edgeGroup(scene, world.deck.x, world.deck.z, world.houseEdge);
-  const plankTex = stripeTexture("#8a5c34", "#7c5230", 12, 1);
+  const plankTex = stripeTexture(t.deckA, t.deckB, 12, 1);
   const deckMat = new THREE.MeshStandardMaterial({ map: plankTex, roughness: 0.95 });
   const W = 15;
   const D = 7.2;
@@ -260,8 +402,8 @@ function buildDeck(scene: THREE.Scene, world: World): void {
   }
 }
 
-function buildPool(scene: THREE.Scene, pool: RectZone): void {
-  const coping = flat(0xe8e2d2);
+function buildPool(scene: THREE.Object3D, pool: RectZone, theme: StageTheme): void {
+  const coping = flat(theme.poolTrim);
   const t = 0.5;
   // rim
   box(scene, pool.w + t * 2, 0.22, t, coping, pool.x, 0.11, pool.z - pool.d / 2 - t / 2);
@@ -271,11 +413,43 @@ function buildPool(scene: THREE.Scene, pool: RectZone): void {
   // water
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(pool.w, pool.d),
-    new THREE.MeshStandardMaterial({ color: 0x3fa8d8, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.92 }),
+    new THREE.MeshStandardMaterial({ color: theme.poolWater, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.92 }),
   );
   water.rotation.x = -Math.PI / 2;
   water.position.set(pool.x, 0.14, pool.z);
   scene.add(water);
+  if (theme.poolStyle === "pond") {
+    // park duck pond: rocks along the rim, lily pads, a pair of ducks
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      const rx = pool.x + Math.cos(a) * (pool.w / 2 + 0.45);
+      const rz = pool.z + Math.sin(a) * (pool.d / 2 + 0.45);
+      const rock = new THREE.Mesh(new THREE.SphereGeometry(0.2 + (i % 3) * 0.07, 6, 5), flat(0x8a8578));
+      rock.position.set(rx, 0.14, rz);
+      rock.scale.y = 0.6;
+      scene.add(rock);
+    }
+    for (const [dx, dz] of [[-0.3, -0.25], [0.25, 0.1], [-0.1, 0.3]] as const) {
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.03, 8), flat(0x4a8a3f));
+      pad.position.set(pool.x + dx * pool.w, 0.16, pool.z + dz * pool.d);
+      scene.add(pad);
+    }
+    for (const [dx, dz] of [[0.15, -0.2], [-0.2, 0.12]] as const) {
+      const duck = new THREE.Group();
+      duck.position.set(pool.x + dx * pool.w, 0.22, pool.z + dz * pool.d);
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), flat(0xf5f2ea));
+      body.scale.set(1.25, 0.8, 1);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.09, 7, 6), flat(0xf5f2ea));
+      head.position.set(0.16, 0.16, 0);
+      const beak = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.09, 6), flat(0xe8a33d));
+      beak.rotation.z = -Math.PI / 2;
+      beak.position.set(0.27, 0.15, 0);
+      duck.add(body, head, beak);
+      duck.rotation.y = (dx + dz) * 9;
+      scene.add(duck);
+    }
+    return;
+  }
   // shallow-end shimmer patch
   const glint = new THREE.Mesh(
     new THREE.PlaneGeometry(pool.w * 0.6, pool.d * 0.35),
@@ -304,14 +478,14 @@ function buildPool(scene: THREE.Scene, pool: RectZone): void {
   }
 }
 
-function buildDriveway(scene: THREE.Scene, world: World): void {
+function buildDriveway(scene: THREE.Object3D, world: World, t: StageTheme): void {
   const d = world.driveway;
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(d.w, 0.07, d.d), flat(0xa8a49a));
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(d.w, 0.07, d.d), flat(t.driveway));
   slab.position.set(d.x, 0.035, d.z);
   scene.add(slab);
 }
 
-function buildCar(scene: THREE.Scene, car: { x: number; z: number; rot: number; hue: number }): void {
+function buildCar(scene: THREE.Object3D, car: { x: number; z: number; rot: number; hue: number }): void {
   const g = new THREE.Group();
   g.position.set(car.x, 0, car.z);
   g.rotation.y = car.rot;
@@ -338,7 +512,7 @@ function buildCar(scene: THREE.Scene, car: { x: number; z: number; rot: number; 
 }
 
 function buildShed(
-  scene: THREE.Scene,
+  scene: THREE.Object3D,
   shed: { x: number; z: number; rot: number },
   wallColor: number,
   roofColor: number,
@@ -358,10 +532,10 @@ function buildShed(
   box(g, 0.7, 0.6, 0.08, flat(0x9cc4de), -0.9, 1.5, 1.22); // window
 }
 
-function buildPond(scene: THREE.Scene, pond: { x: number; z: number; r: number }): void {
+function buildPond(scene: THREE.Object3D, pond: { x: number; z: number; r: number }, t: StageTheme): void {
   const water = new THREE.Mesh(
     new THREE.CylinderGeometry(pond.r, pond.r, 0.08, 20),
-    new THREE.MeshStandardMaterial({ color: 0x3583b8, roughness: 0.25, transparent: true, opacity: 0.92 }),
+    new THREE.MeshStandardMaterial({ color: t.pondWater, roughness: 0.25, transparent: true, opacity: 0.92 }),
   );
   water.position.set(pond.x, 0.05, pond.z);
   scene.add(water);
@@ -392,7 +566,7 @@ function buildPond(scene: THREE.Scene, pond: { x: number; z: number; r: number }
   scene.add(tier1, tier2, jet);
 }
 
-function buildSoccerGoal(scene: THREE.Scene, at: { x: number; z: number; rot: number }): void {
+function buildSoccerGoal(scene: THREE.Object3D, at: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(at.x, 0, at.z);
   g.rotation.y = at.rot;
@@ -414,7 +588,7 @@ function buildSoccerGoal(scene: THREE.Scene, at: { x: number; z: number; rot: nu
   }
 }
 
-function buildDoghouse(scene: THREE.Scene, at: { x: number; z: number; rot: number }): void {
+function buildDoghouse(scene: THREE.Object3D, at: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(at.x, 0, at.z);
   g.rotation.y = at.rot;
@@ -431,7 +605,7 @@ function buildDoghouse(scene: THREE.Scene, at: { x: number; z: number; rot: numb
   box(g, 0.5, 0.42, 0.06, flat(0x1c1e24), 0, 0.24, 0.71); // dark doorway
 }
 
-function buildBirdbath(scene: THREE.Scene, at: { x: number; z: number }): void {
+function buildBirdbath(scene: THREE.Object3D, at: { x: number; z: number }): void {
   const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 0.75, 8), flat(0xb5af9f));
   ped.position.set(at.x, 0.38, at.z);
   const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.28, 0.16, 12), flat(0xb5af9f));
@@ -444,7 +618,7 @@ function buildBirdbath(scene: THREE.Scene, at: { x: number; z: number }): void {
   scene.add(ped, bowl, water);
 }
 
-function buildClothesline(scene: THREE.Scene, at: { x: number; z: number; rot: number }): void {
+function buildClothesline(scene: THREE.Object3D, at: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(at.x, 0, at.z);
   g.rotation.y = at.rot;
@@ -468,7 +642,7 @@ function buildClothesline(scene: THREE.Scene, at: { x: number; z: number; rot: n
   }
 }
 
-function buildVeggieGarden(scene: THREE.Scene, at: { x: number; z: number; rot: number }): void {
+function buildVeggieGarden(scene: THREE.Object3D, at: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(at.x, 0, at.z);
   g.rotation.y = at.rot;
@@ -484,7 +658,7 @@ function buildVeggieGarden(scene: THREE.Scene, at: { x: number; z: number; rot: 
   }
 }
 
-function buildBench(scene: THREE.Scene, at: { x: number; z: number; rot: number }): void {
+function buildBench(scene: THREE.Object3D, at: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(at.x, 0, at.z);
   g.rotation.y = at.rot;
@@ -499,7 +673,7 @@ function buildBench(scene: THREE.Scene, at: { x: number; z: number; rot: number 
   }
 }
 
-function buildCloud(scene: THREE.Scene, c: { x: number; y: number; z: number; s: number }): void {
+function buildCloud(scene: THREE.Object3D, c: { x: number; y: number; z: number; s: number }): void {
   const g = new THREE.Group();
   g.position.set(c.x, c.y, c.z);
   scene.add(g);
@@ -517,7 +691,7 @@ function buildCloud(scene: THREE.Scene, c: { x: number; y: number; z: number; s:
   }
 }
 
-function buildSandpit(scene: THREE.Scene, pit: { x: number; z: number; r: number }): void {
+function buildSandpit(scene: THREE.Object3D, pit: { x: number; z: number; r: number }): void {
   const sand = new THREE.Mesh(new THREE.CylinderGeometry(pit.r, pit.r, 0.14, 14), flat(0xe3cd97));
   sand.position.set(pit.x, 0.07, pit.z);
   scene.add(sand);
@@ -545,7 +719,7 @@ function buildSandpit(scene: THREE.Scene, pit: { x: number; z: number; r: number
   scene.add(castle);
 }
 
-function buildTrampoline(scene: THREE.Scene, tr: { x: number; z: number }): void {
+function buildTrampoline(scene: THREE.Object3D, tr: { x: number; z: number }): void {
   const g = new THREE.Group();
   g.position.set(tr.x, 0, tr.z);
   scene.add(g);
@@ -562,7 +736,7 @@ function buildTrampoline(scene: THREE.Scene, tr: { x: number; z: number }): void
   }
 }
 
-function buildBbq(scene: THREE.Scene, bbq: { x: number; z: number; rot: number }): void {
+function buildBbq(scene: THREE.Object3D, bbq: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(bbq.x, 0, bbq.z);
   g.rotation.y = bbq.rot;
@@ -582,7 +756,7 @@ function buildBbq(scene: THREE.Scene, bbq: { x: number; z: number; rot: number }
   box(g, 0.55, 0.05, 0.35, flat(0x8d6b48), 0.55, 0.8, 0); // side shelf
 }
 
-function buildPicnicTable(scene: THREE.Scene, p: { x: number; z: number; rot: number }): void {
+function buildPicnicTable(scene: THREE.Object3D, p: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(p.x, 0, p.z);
   g.rotation.y = p.rot;
@@ -596,7 +770,7 @@ function buildPicnicTable(scene: THREE.Scene, p: { x: number; z: number; rot: nu
   }
 }
 
-function buildMower(scene: THREE.Scene, m: { x: number; z: number; rot: number }): void {
+function buildMower(scene: THREE.Object3D, m: { x: number; z: number; rot: number }): void {
   const g = new THREE.Group();
   g.position.set(m.x, 0, m.z);
   g.rotation.y = m.rot;
@@ -616,21 +790,57 @@ function buildMower(scene: THREE.Scene, m: { x: number; z: number; rot: number }
   box(g, 0.44, 0.04, 0.05, flat(0x4a4d55), 0, 1.2, -1.18); // handle grip
 }
 
-function buildTree(scene: THREE.Scene, x: number, z: number, s: number, tireSwing: boolean): void {
+function buildTree(
+  scene: THREE.Object3D,
+  x: number,
+  z: number,
+  s: number,
+  tireSwing: boolean,
+  kind: StageTheme["treeKind"],
+): void {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
   scene.add(g);
+  if (kind === "palm") {
+    // one leaning trunk, frond crown at its tip, coconuts
+    const lean = Math.sin(x * 3.1 + z * 1.7) * 0.14;
+    const trunkLen = 3.3 * s;
+    const trunk = cyl(g, 0.11 * s, 0.17 * s, trunkLen, "#9a7a52", 0, trunkLen / 2, 0, 7);
+    trunk.rotation.z = lean;
+    const crownX = -Math.sin(lean) * trunkLen * 0.5; // trunk tip after the tilt
+    const crownY = trunkLen * 0.5 + Math.cos(lean) * trunkLen * 0.5;
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const frond = new THREE.Mesh(new THREE.ConeGeometry(0.34 * s, 1.9 * s, 4), flat(i % 2 ? 0x3f8a44 : 0x4a9a4e));
+      frond.position.set(crownX + Math.cos(a) * 0.85 * s, crownY, Math.sin(a) * 0.85 * s);
+      frond.rotation.z = Math.cos(a) * 1.35 + Math.PI / 2;
+      frond.rotation.y = -a;
+      frond.scale.y = 0.55;
+      frond.scale.z = 0.28;
+      g.add(frond);
+    }
+    for (const [dx, dz] of [[0.18, 0.05], [-0.1, 0.16]] as const) {
+      const nut = new THREE.Mesh(new THREE.SphereGeometry(0.13 * s, 7, 6), flat(0x6b4f33));
+      nut.position.set(crownX + dx, crownY - 0.28 * s, dz);
+      g.add(nut);
+    }
+    return;
+  }
   const trunk = cyl(g, 0.16 * s, 0.24 * s, 2.6 * s, "#6b4f33", 0, 1.3 * s, 0, 8);
   trunk.rotation.y = x + z; // vary silhouette
-  const leaf = flat(0x4a8a3f);
-  const leaf2 = flat(0x548f46);
+  // autumn park trees mix warm canopies; the backyard stays summer green
+  const palettes =
+    kind === "autumn"
+      ? [flat(0xc0783a), flat(0xd9a13b), flat(0x8f9a3a), flat(0xb85c33)]
+      : [flat(0x4a8a3f), flat(0x548f46)];
   for (const [cx, cy, cz, r] of [
     [0, 3.1 * s, 0, 1.55 * s],
     [0.9 * s, 2.7 * s, 0.3 * s, 1.1 * s],
     [-0.8 * s, 2.8 * s, -0.4 * s, 1.15 * s],
     [0.1 * s, 2.5 * s, 0.9 * s, 1.0 * s],
   ] as const) {
-    const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 9, 7), (cx + cz) * 7 % 2 < 1 ? leaf : leaf2);
+    const pick = Math.abs(Math.floor((cx + cz) * 7 + x + z)) % palettes.length;
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 9, 7), palettes[pick]);
     puff.position.set(cx, cy, cz);
     g.add(puff);
   }
@@ -643,7 +853,7 @@ function buildTree(scene: THREE.Scene, x: number, z: number, s: number, tireSwin
 }
 
 function buildPlayground(
-  scene: THREE.Scene,
+  scene: THREE.Object3D,
   at: { x: number; z: number; rot: number },
   palette: { frame: number; bar: number; seat: number },
 ): void {
@@ -707,7 +917,7 @@ function buildPlayground(
   g.add(seesaw);
 }
 
-function buildHoop(scene: THREE.Scene, world: World): void {
+function buildHoop(scene: THREE.Object3D, world: World): void {
   const g = new THREE.Group();
   g.position.set(world.hoop.x, 0, world.hoop.z);
   g.rotation.y = world.hoop.rot;
@@ -725,7 +935,31 @@ function buildHoop(scene: THREE.Scene, world: World): void {
   g.add(ring);
 }
 
-function buildHedge(scene: THREE.Scene, x: number, z: number, s: number): void {
+function buildHedge(scene: THREE.Object3D, x: number, z: number, s: number, kind: StageTheme["hedgeKind"]): void {
+  if (kind === "rock") {
+    // beach boulder + a small companion stone (same collider footprint)
+    const rock = new THREE.Mesh(new THREE.SphereGeometry(0.52 * s, 7, 6), flat(0x9a9284));
+    rock.position.set(x, 0.42 * s, z);
+    rock.scale.y = 0.8;
+    rock.rotation.y = x * 2 + z;
+    scene.add(rock);
+    const pebble = new THREE.Mesh(new THREE.SphereGeometry(0.2 * s, 6, 5), flat(0x8a8274));
+    pebble.position.set(x + 0.45 * s, 0.14 * s, z + 0.2 * s);
+    pebble.scale.y = 0.7;
+    scene.add(pebble);
+    return;
+  }
+  if (kind === "round") {
+    // trimmed park topiary: two stacked spheres
+    const lower = new THREE.Mesh(new THREE.SphereGeometry(0.52 * s, 9, 7), flat(0x3f7a44));
+    lower.position.set(x, 0.5 * s, z);
+    lower.scale.y = 0.85;
+    scene.add(lower);
+    const upper = new THREE.Mesh(new THREE.SphereGeometry(0.34 * s, 8, 6), flat(0x498a4e));
+    upper.position.set(x, 1.2 * s, z);
+    scene.add(upper);
+    return;
+  }
   const cone = new THREE.Mesh(new THREE.ConeGeometry(0.55 * s, 2.3 * s, 8), flat(0x2f5d31));
   cone.position.set(x, 1.15 * s, z);
   scene.add(cone);
@@ -735,7 +969,48 @@ function buildHedge(scene: THREE.Scene, x: number, z: number, s: number): void {
   scene.add(base);
 }
 
-function buildBed(scene: THREE.Scene, x: number, z: number, r: number, hue: number): void {
+function buildBed(
+  scene: THREE.Object3D,
+  x: number,
+  z: number,
+  r: number,
+  hue: number,
+  kind: StageTheme["bedKind"],
+): void {
+  if (kind === "seagrass") {
+    // dune patch: darker sand, seagrass tufts, one starfish (solid bush spot
+    // is the same off-center circle the collider uses)
+    const sand = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.08, 14), flat(0xd0bc84));
+    sand.position.set(x, 0.04, z);
+    scene.add(sand);
+    const clump = new THREE.Group();
+    clump.position.set(x - r * 0.25, 0, z);
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.05 * r, 1.1 * r, 5), flat(i % 2 ? 0x7a9a5a : 0x6a8a4e));
+      blade.position.set(Math.cos(a) * 0.3 * r, 0.5 * r, Math.sin(a) * 0.3 * r);
+      blade.rotation.z = Math.cos(a) * 0.35;
+      blade.rotation.x = -Math.sin(a) * 0.35;
+      clump.add(blade);
+    }
+    scene.add(clump);
+    const star = new THREE.Group();
+    star.position.set(x + r * 0.5, 0.1, z + r * 0.3);
+    star.rotation.y = hue;
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      const arm = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.26, 5), flat(0xe07a4a));
+      arm.rotation.z = Math.PI / 2 + a;
+      arm.position.set(Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12);
+      arm.rotation.y = -a;
+      star.add(arm);
+    }
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), flat(0xe07a4a));
+    star.add(core);
+    star.scale.y = 0.4;
+    scene.add(star);
+    return;
+  }
   const mulch = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.1, 14), flat(0x5a4028));
   mulch.position.set(x, 0.05, z);
   scene.add(mulch);

@@ -17,6 +17,8 @@ export type PhaseName =
 export interface MatchSettings {
   createSecs: number;
   roundSecs: number;
+  /** index into STAGES; host picks it in the lobby, applied at match start */
+  stage: number;
 }
 
 export interface PlayerInfo {

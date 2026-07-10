@@ -210,6 +210,7 @@ export class NetClient {
         this.totals = m.totals;
         this.saveResume(m.resume);
         if (this.game) {
+          this.game.setStage(m.settings.stage ?? 0);
           // reconnected mid-session: keep the running Game (a second init
           // would double every listener) and just resync room state; the
           // server re-sends propAdded/phase, snapshots self-heal the rest
@@ -223,7 +224,7 @@ export class NetClient {
           this.sendPing();
           break;
         }
-        const game = new Game(this.container, m.seed);
+        const game = new Game(this.container, m.seed, m.settings.stage ?? 0);
         game.fakeRoundsEnabled = false;
         game.setLocalSpawn(this.myId);
         for (const p of m.players) if (p.id !== this.myId) game.addRemote(p.id);
@@ -248,6 +249,9 @@ export class NetClient {
       case "lobby":
         this.players = m.players;
         this.totals = m.totals;
+        // the host may have picked another stage — rebuild the world before
+        // the CREATE phase message drops everyone into it
+        this.game?.setStage(m.settings.stage ?? 0);
         this.ui.updatePlayers(m.players, this.isHost(), m.settings);
         for (const p of m.players) if (p.id !== this.myId) this.game?.addRemote(p.id);
         break;

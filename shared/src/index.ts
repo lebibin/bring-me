@@ -1,4 +1,5 @@
 export * from "./constants.ts";
+export * from "./stages.ts";
 export * from "./rng.ts";
 export * from "./catalog.ts";
 export * from "./worldgen.ts";
