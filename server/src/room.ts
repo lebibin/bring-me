@@ -39,6 +39,7 @@ import {
   decodeC2S,
   encode,
   generateWorld,
+  groundHeightAt,
   mulberry32,
   placementValid,
   q2,
@@ -92,6 +93,7 @@ interface Attachment {
 
 interface PlayerState extends RulePlayer {
   name: string;
+  y: number; // jump height, client-reported
   lastPosMs: number;
 }
 
@@ -214,7 +216,7 @@ export class BringMeRoom {
         await this.onStart(p, msg.settings);
         break;
       case "pos":
-        this.onPos(p, msg.x, msg.z, msg.yaw);
+        this.onPos(p, msg.x, msg.z, msg.yaw, msg.y ?? 0);
         break;
       case "pickObject":
         this.onPick(p, msg.archetype, msg.params.hue, msg.params.scale);
@@ -331,7 +333,7 @@ export class BringMeRoom {
       held.heldBy = 0;
       held.x = p.x;
       held.z = p.z;
-      held.y = PROP_REST_Y;
+      held.y = groundHeightAt(this.world(), p.x, p.z, Math.max(p.y, 0), 0.05) + PROP_REST_Y;
       held.moved = true;
       this.broadcast({ type: "dropped", propId: held.propId, x: q2(p.x), z: q2(p.z), lockUntil: 0, lockedFor: 0 });
     }
@@ -404,8 +406,8 @@ export class BringMeRoom {
       this.sayTo(p.id, { type: "err", code: "bad_input" });
       return;
     }
-    // bounds, plaza keep-out, and off-limits zones (pool/deck/house/playground)
-    if (!placementValid(this.world(), x, z)) {
+    // bounds, plaza keep-out, off-limits zones — standable tops ARE legal
+    if (!placementValid(this.world(), x, z, true)) {
       this.sayTo(p.id, { type: "err", code: "bad_input" });
       return;
     }
@@ -538,7 +540,8 @@ export class BringMeRoom {
       propId,
       creatorId: home.creatorId,
       x: home.x,
-      y: PROP_REST_Y * home.scale,
+      // created objects may be placed ON standable fixture tops
+      y: groundHeightAt(this.world(), home.x, home.z, 99, 0.05) + PROP_REST_Y * home.scale,
       z: home.z,
       vx: 0,
       vy: 0,
@@ -576,12 +579,21 @@ export class BringMeRoom {
     const m = this.match;
     if (!m || m.phase !== "SEEK") return;
     const result = resolveRound(m, now, deliverer);
-    // only the target leaves play — decoys people are hauling stay in hand
-    const target = this.dyn.get(createdPropId(result.creatorId));
-    if (target && target.heldBy !== 0) {
-      const holder = this.players.get(target.heldBy);
-      if (holder) holder.carry = -1;
-      target.heldBy = 0;
+    // round over: EVERY hand empties — each held prop drops in place with a
+    // broadcast, so no client can end the round out of sync on carry state
+    const w = this.world();
+    for (const p of this.players.values()) {
+      if (p.carry < 0) continue;
+      const d = this.dyn.get(p.carry);
+      p.carry = -1;
+      if (!d) continue;
+      d.heldBy = 0;
+      d.airborne = false;
+      d.x = p.x;
+      d.z = p.z;
+      d.y = groundHeightAt(w, p.x, p.z, Math.max(p.y, 0), 0.05) + PROP_REST_Y;
+      d.moved = true;
+      this.broadcast({ type: "dropped", propId: d.propId, x: q2(d.x), z: q2(d.z), lockUntil: 0, lockedFor: 0 });
     }
     if (result.found) {
       this.broadcast({ type: "delivered", byId: deliverer, propId: createdPropId(result.creatorId), points: result.delivererPoints });
@@ -630,7 +642,7 @@ export class BringMeRoom {
     d.heldBy = 0;
     d.x = p.x;
     d.z = p.z;
-    d.y = PROP_REST_Y;
+    d.y = groundHeightAt(this.world(), p.x, p.z, Math.max(p.y, 0), 0.05) + PROP_REST_Y;
     d.moved = true;
     p.carry = -1;
     this.broadcast({ type: "dropped", propId: d.propId, x: q2(d.x), z: q2(d.z), lockUntil: 0, lockedFor: 0 });
@@ -700,7 +712,7 @@ export class BringMeRoom {
       d.heldBy = 0;
       d.x = victim.x;
       d.z = victim.z;
-      d.y = PROP_REST_Y;
+      d.y = groundHeightAt(this.world(), victim.x, victim.z, Math.max(victim.y, 0), 0.05) + PROP_REST_Y;
       d.moved = true;
       d.lockUntil = now + DROP_LOCK_MS;
       d.lockedFor = victimId;
@@ -716,8 +728,9 @@ export class BringMeRoom {
     }
   }
 
-  private onPos(p: PlayerState, x: number, z: number, yaw: number): void {
+  private onPos(p: PlayerState, x: number, z: number, yaw: number, y: number): void {
     if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(yaw)) return;
+    p.y = Number.isFinite(y) ? Math.min(4, Math.max(0, y)) : 0;
     const now = Date.now();
     if (now < p.stunnedUntil) return; // frozen — stuns are real, not cosmetic
     let nx = clampToMap(x);
@@ -754,7 +767,7 @@ export class BringMeRoom {
         // thrown-prop flight, shared ballistics
         if (d.airborne) {
           const b: Ballistic = { x: d.x, y: d.y, z: d.z, vx: d.vx, vy: d.vy, vz: d.vz, resting: false };
-          stepBallistic(b, TICK_MS / 1000);
+          stepBallistic(b, TICK_MS / 1000, w);
           d.x = b.x;
           d.y = b.y;
           d.z = b.z;
@@ -795,6 +808,7 @@ export class BringMeRoom {
       players.push({
         id: p.id,
         x: q2(p.x),
+        y: q2(p.y),
         z: q2(p.z),
         yaw: q2(p.yaw),
         carry: p.carry,
@@ -856,6 +870,7 @@ export class BringMeRoom {
       id,
       name,
       x: spawn.x,
+      y: 0,
       z: spawn.z,
       yaw: 0,
       carry: -1,

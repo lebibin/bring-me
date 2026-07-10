@@ -39,6 +39,10 @@ export const CREATED_PROP_ID_BASE = 100000;
 export const PLAYER_SPEED = 6; // m/s
 export const CARRY_SPEED = 4.2; // m/s while carrying
 export const PLAYER_RADIUS = 0.45;
+// Jumping: v²/2g ≈ 0.97 m apex — clears every "standable" fixture top
+// (bench/picnic/veggie/trampoline/car/doghouse) but not sheds or the house.
+export const JUMP_VY = 5.9;
+export const STEP_UP = 0.35; // max ledge you can walk up without jumping
 // Server-side clamp slack on client-reported displacement.
 export const SPEED_CLAMP_SLACK = 1.5;
 

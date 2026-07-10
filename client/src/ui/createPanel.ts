@@ -34,7 +34,7 @@ export class CreatePanel {
       </div>
       <label>color <input id="cp-hue" type="range" min="0" max="359" value="${this.sel.params.hue}" /></label>
       <label>size <input id="cp-scale" type="range" min="${SCALE_MIN}" max="${SCALE_MAX}" step="0.05" value="${this.sel.params.scale}" /></label>
-      <button class="place" id="cp-place">Place here (P)</button>
+      <button class="place" id="cp-place">Place here (R)</button>
       <div class="status" id="cp-status">walk around — the ghost shows where it lands</div>`;
     this.statusEl = this.root.querySelector("#cp-status");
 

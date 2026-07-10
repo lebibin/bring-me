@@ -95,8 +95,11 @@ export interface World {
    * circle colliders for PLAYER movement — things you can't walk through in
    * real life (cars, sheds, tree trunks, pond water...). The pool and house
    * rects also block; walkable surfaces (deck, driveway, sandpit) don't.
+   * `h` > 0 marks a flat standable top at that height (jump on it, place
+   * objects on it); h = 0 means unpassable at any height (bushes, water,
+   * pitched roofs, poles).
    */
-  solids: { x: number; z: number; r: number }[];
+  solids: { x: number; z: number; r: number; h: number }[];
 }
 
 const HALF = MAP_SIZE / 2;
@@ -124,30 +127,57 @@ export function insideRect(r: RectZone, x: number, z: number, margin = 0): boole
 /**
  * Is this spot inside something a player can't walk through? `margin` grows
  * every collider (worldgen uses it to keep spawn points clear of solids, not
- * merely outside them).
+ * merely outside them). `y` is the player's feet height: a solid with a
+ * standable top stops blocking once you're at/above that top.
  */
-export function blockedAt(w: World, x: number, z: number, margin = 0): boolean {
+export function blockedAt(w: World, x: number, z: number, margin = 0, y = 0): boolean {
   const pr = PLAYER_RADIUS + margin;
-  if (insideRect(w.pool, x, z, pr)) return true;
+  if (insideRect(w.pool, x, z, pr)) return true; // water — no wading, no landing
   if (insideRect(w.house, x, z, pr)) return true;
   for (const s of w.solids) {
-    if (Math.hypot(x - s.x, z - s.z) < s.r + pr) return true;
+    if (Math.hypot(x - s.x, z - s.z) >= s.r + pr) continue;
+    if (s.h > 0 && y >= s.h - 0.05) continue; // standing on top of it
+    return true;
   }
   return false;
 }
 
-/** Can a prop legally sit / be hidden here? (server validates placements with this too) */
-export function placementValid(w: World, x: number, z: number): boolean {
+/**
+ * Height of the surface under (x, z) reachable from feet height `fromY` —
+ * standable solid tops and the deck count; everything else is lawn (0).
+ * `stepUp` is how much higher than fromY a surface may be and still count
+ * (walking up small ledges); pass Infinity to ask "highest surface here".
+ */
+export function groundHeightAt(w: World, x: number, z: number, fromY: number, stepUp = 0.35): number {
+  let best = 0;
+  if (insideRect(w.deck, x, z)) best = 0.28; // deck planks are walk-on
+  for (const s of w.solids) {
+    if (s.h <= 0 || s.h > best) {
+      if (s.h > 0 && s.h <= fromY + stepUp && Math.hypot(x - s.x, z - s.z) < s.r + PLAYER_RADIUS * 0.6) {
+        best = Math.max(best, s.h);
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Can a prop legally sit / be hidden here? (server validates placements with
+ * this too). With `allowTops`, a spot over a STANDABLE solid is legal — the
+ * object rides on its top surface (players place things on car roofs etc.);
+ * random scatter keeps allowTops=false so decoys stay on the lawn.
+ */
+export function placementValid(w: World, x: number, z: number, allowTops = false): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
   if (Math.abs(x) > HALF - 1 || Math.abs(z) > HALF - 1) return false;
   if (Math.hypot(x - w.plaza.x, z - w.plaza.z) < PLAZA_KEEPOUT) return false;
   if (insideRect(w.pool, x, z, 0.8)) return false;
-  if (insideRect(w.deck, x, z, 0.4)) return false;
+  if (insideRect(w.deck, x, z, 0.4) && !allowTops) return false;
   if (insideRect(w.house, x, z, 0.6)) return false;
-  // every solid fixture contributes one circle (tree entries are trunk-only —
-  // under the canopy stays fair hiding ground)
   for (const zo of w.zones) {
-    if (Math.hypot(x - zo.x, z - zo.z) < zo.r) return false;
+    if (Math.hypot(x - zo.x, z - zo.z) >= zo.r) continue;
+    if (allowTops && w.solids.some((s) => s.h > 0 && Math.hypot(x - s.x, z - s.z) < s.r)) continue;
+    return false;
   }
   return true;
 }
@@ -225,7 +255,7 @@ export function generateWorld(seed: number): World {
     { x: hoop.x, z: hoop.z, r: 5 },
   ];
   const pickSpot = (selfR: number, inset = 6): { x: number; z: number } => {
-    for (let attempt = 0; attempt < 60; attempt++) {
+    for (let attempt = 0; attempt < 200; attempt++) {
       const x = randRange(rng, -HALF + inset, HALF - inset);
       const z = randRange(rng, -HALF + inset, HALF - inset);
       if (blockers.every((b) => Math.hypot(x - b.x, z - b.z) >= b.r + selfR)) {
@@ -233,10 +263,22 @@ export function generateWorld(seed: number): World {
         return { x, z };
       }
     }
-    const fx = randRange(rng, -8, 8);
-    const fz = randRange(rng, -8, 8);
-    blockers.push({ x: fx, z: fz, r: selfR });
-    return { x: fx, z: fz };
+    // random sampling exhausted: deterministic sweep for the spot with the
+    // MOST clearance — never dump a fixture on top of another one
+    let best = { x: 0, z: 0 };
+    let bestClear = -Infinity;
+    for (let gx = -HALF + inset; gx <= HALF - inset; gx += 2.5) {
+      for (let gz = -HALF + inset; gz <= HALF - inset; gz += 2.5) {
+        let clear = Infinity;
+        for (const b of blockers) clear = Math.min(clear, Math.hypot(gx - b.x, gz - b.z) - b.r);
+        if (clear > bestClear) {
+          bestClear = clear;
+          best = { x: gx, z: gz };
+        }
+      }
+    }
+    blockers.push({ x: best.x, z: best.z, r: selfR });
+    return best;
   };
 
   // shed in the corner between the house wall and the hoop's fence
@@ -259,7 +301,7 @@ export function generateWorld(seed: number): World {
   blockers.push({ x: sandpit.x, z: sandpit.z, r: 3.4 });
 
   const trees: { x: number; z: number; s: number }[] = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 9; i++) {
     const spot = pickSpot(4.2);
     trees.push({ ...spot, s: randRange(rng, 0.85, 1.4) });
   }
@@ -278,6 +320,7 @@ export function generateWorld(seed: number): World {
   const clothesline = { ...pickSpot(3.2), rot: randRange(rng, 0, Math.PI * 2) };
   const veggie = { ...pickSpot(3), rot: randRange(rng, 0, Math.PI * 2) };
   const benches = [
+    { ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) },
     { ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) },
     { ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) },
   ];
@@ -376,7 +419,7 @@ export function generateWorld(seed: number): World {
   // Hedges (cypress) along the side fences AND the plaza fence, skipping structures.
   for (const side of [sideA, sideB, edge]) {
     const info = edgeInfo(side);
-    for (let a = -HALF + 4; a <= HALF - 4; a += randRange(rng, 3.6, 5.2)) {
+    for (let a = -HALF + 4; a <= HALF - 4; a += randRange(rng, 3.0, 4.4)) {
       const hx = info.wx + info.nx * 1.6 + info.tx * a;
       const hz = info.wz + info.nz * 1.6 + info.tz * a;
       if (Math.hypot(hx - playground.x, hz - playground.z) < 6) continue;
@@ -389,17 +432,18 @@ export function generateWorld(seed: number): World {
       world.hedges.push({ x: hx, z: hz, s: randRange(rng, 0.8, 1.35) });
     }
   }
-  // A few bushes flanking the house.
+  // A few bushes flanking the house — kept at ±12.5 lateral so they clear
+  // both the doghouse (lateral +14) and the driveway lane (around -9.5).
   for (const off of [-1, 1]) {
     world.hedges.push({
-      x: house.x + (houseEdge % 2 === 0 ? off * 14.5 : hInfo.nx * 2.2),
-      z: house.z + (houseEdge % 2 === 0 ? hInfo.nz * 2.2 : off * 14.5),
+      x: house.x + (houseEdge % 2 === 0 ? off * 12.5 : hInfo.nx * 2.2),
+      z: house.z + (houseEdge % 2 === 0 ? hInfo.nz * 2.2 : off * 12.5),
       s: randRange(rng, 0.7, 1.0),
     });
   }
 
   // Garden beds with flowers.
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 11; i++) {
     for (let attempt = 0; attempt < 12; attempt++) {
       const bx = randRange(rng, -HALF + 4, HALF - 4);
       const bz = randRange(rng, -HALF + 4, HALF - 4);
@@ -409,22 +453,23 @@ export function generateWorld(seed: number): World {
     }
   }
 
-  // Player-blocking colliders (hedges exist by now; pool/house block as rects).
+  // Player-blocking colliders (hedges exist by now; pool/house block as
+  // rects). h > 0 = flat standable top you can jump onto / place objects on.
   world.solids = [
-    { x: car.x, z: car.z, r: 1.6 },
-    { x: car2.x, z: car2.z, r: 1.6 },
-    { x: shed.x, z: shed.z, r: 1.9 },
-    { x: shed2.x, z: shed2.z, r: 1.9 },
-    { x: pond.x, z: pond.z, r: pond.r }, // no wading
-    { x: doghouse.x, z: doghouse.z, r: 0.9 },
-    { x: birdbath.x, z: birdbath.z, r: 0.5 },
-    { x: bbq.x, z: bbq.z, r: 0.55 },
-    { x: picnic.x, z: picnic.z, r: 1.2 },
-    { x: trampoline.x, z: trampoline.z, r: 1.75 },
-    { x: veggie.x, z: veggie.z, r: 1.8 },
-    ...benches.map((b) => ({ x: b.x, z: b.z, r: 0.8 })),
-    ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.5 * t.s })),
-    ...world.hedges.map((h) => ({ x: h.x, z: h.z, r: 0.5 * h.s })),
+    { x: car.x, z: car.z, r: 1.6, h: 0.95 },
+    { x: car2.x, z: car2.z, r: 1.6, h: 0.95 },
+    { x: shed.x, z: shed.z, r: 1.9, h: 0 }, // pitched roof — no standing
+    { x: shed2.x, z: shed2.z, r: 1.9, h: 0 },
+    { x: pond.x, z: pond.z, r: pond.r, h: 0 }, // no wading
+    { x: doghouse.x, z: doghouse.z, r: 0.9, h: 0.95 },
+    { x: birdbath.x, z: birdbath.z, r: 0.5, h: 0 },
+    { x: bbq.x, z: bbq.z, r: 0.55, h: 0 },
+    { x: picnic.x, z: picnic.z, r: 1.2, h: 0.78 },
+    { x: trampoline.x, z: trampoline.z, r: 1.75, h: 0.85 },
+    { x: veggie.x, z: veggie.z, r: 1.8, h: 0.42 },
+    ...benches.map((b) => ({ x: b.x, z: b.z, r: 0.8, h: 0.5 })),
+    ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.5 * t.s, h: 0 })),
+    ...world.hedges.map((h) => ({ x: h.x, z: h.z, r: 0.5 * h.s, h: 0 })),
   ];
 
   // Spawn safety: with the full collider set known, no spawn point may sit

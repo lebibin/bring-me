@@ -45,6 +45,18 @@ let failures = 0;
 for (let s = 1; s <= SEEDS; s++) {
   const seed = (s * 2654435761) >>> 0;
   const w = generateWorld(seed);
+  // no two solid fixtures may overlap (objects spawning inside each other)
+  for (let i = 0; i < w.solids.length; i++) {
+    for (let j = i + 1; j < w.solids.length; j++) {
+      const a = w.solids[i];
+      const b = w.solids[j];
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      if (d < a.r + b.r - 0.05) {
+        console.error(`FAIL seed ${seed}: solids ${i} and ${j} overlap by ${(a.r + b.r - d).toFixed(2)}m`);
+        failures++;
+      }
+    }
+  }
   const region = reachable(w, w.npc.x, w.npc.z);
   for (let i = 0; i < w.spawnPoints.length; i++) {
     const sp = w.spawnPoints[i];
@@ -63,5 +75,5 @@ if (failures) {
   console.error(`\n${failures} failure(s) across ${SEEDS} seeds`);
   process.exit(1);
 }
-console.log(`worldcheck: ${SEEDS} seeds x 8 spawns — all clear and all reach the NPC`);
+console.log(`worldcheck: ${SEEDS} seeds — spawns clear, all reach the NPC, no overlapping solids`);
 process.exit(0);

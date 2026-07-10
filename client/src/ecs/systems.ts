@@ -5,8 +5,11 @@ import {
   CARRY_HEIGHT,
   CARRY_SPEED,
   GRAB_RADIUS,
+  GRAVITY,
+  JUMP_VY,
   PLAYER_SPEED,
   PROP_REST_Y,
+  groundHeightAt,
   stepBallistic,
   stepMove,
   throwVelocity,
@@ -41,34 +44,66 @@ export function carriedPropEid(playerEid: number): number {
   return 0;
 }
 
+let localVy = 0;
+
 export function movementSystem(dt: number): void {
   const eid = localEid();
   if (!eid) return;
   const f = input.forward;
   const s = input.strafe;
-  if (f === 0 && s === 0) return;
-  // forward = (sin yaw, cos yaw); right = fwd x up = (-cos yaw, sin yaw)
-  const dirX = Math.sin(input.camYaw) * f - Math.cos(input.camYaw) * s;
-  const dirZ = Math.cos(input.camYaw) * f + Math.sin(input.camYaw) * s;
-  const speed = carriedPropEid(eid) ? CARRY_SPEED : PLAYER_SPEED;
-  const next = stepMove(
-    { x: Position.x[eid], z: Position.z[eid] },
-    { x: dirX, z: dirZ },
-    speed,
-    dt,
-    simWorld ?? undefined,
-  );
-  Position.x[eid] = next.x;
-  Position.z[eid] = next.z;
-  Yaw.v[eid] = Math.atan2(dirX, dirZ);
+  const y = Position.y[eid];
+  if (f !== 0 || s !== 0) {
+    // forward = (sin yaw, cos yaw); right = fwd x up = (-cos yaw, sin yaw)
+    const dirX = Math.sin(input.camYaw) * f - Math.cos(input.camYaw) * s;
+    const dirZ = Math.cos(input.camYaw) * f + Math.sin(input.camYaw) * s;
+    const speed = carriedPropEid(eid) ? CARRY_SPEED : PLAYER_SPEED;
+    const next = stepMove(
+      { x: Position.x[eid], z: Position.z[eid] },
+      { x: dirX, z: dirZ },
+      speed,
+      dt,
+      simWorld ?? undefined,
+      y,
+    );
+    Position.x[eid] = next.x;
+    Position.z[eid] = next.z;
+    Yaw.v[eid] = Math.atan2(dirX, dirZ);
+  }
+  // vertical: jump, gravity, land on lawn / deck / standable fixture tops
+  const ground = simWorld ? groundHeightAt(simWorld, Position.x[eid], Position.z[eid], y) : 0;
+  const grounded = y <= ground + 0.001 && localVy <= 0;
+  if (input.jump && grounded) localVy = JUMP_VY;
+  input.jump = false;
+  if (!grounded || localVy > 0) {
+    localVy -= GRAVITY * dt;
+    let ny = y + localVy * dt;
+    if (ny <= ground) {
+      ny = ground;
+      localVy = 0;
+    }
+    Position.y[eid] = ny;
+  } else if (y > ground) {
+    // walked off a ledge — start falling next frame
+    localVy = -0.01;
+  } else {
+    Position.y[eid] = ground; // step up small ledges / follow deck height
+  }
+}
+
+/** Is the local player standing (not mid-jump)? Used by the pose layer. */
+export function localAirborne(): boolean {
+  const eid = localEid();
+  if (!eid) return false;
+  const ground = simWorld ? groundHeightAt(simWorld, Position.x[eid], Position.z[eid], Position.y[eid]) : 0;
+  return Position.y[eid] > ground + 0.03;
 }
 
 export function carrySystem(): void {
   for (const eid of carriedQ(world)) {
     const carrier = CarriedBy.eid[eid];
-    // held out in front at chest height, not balanced on the head
+    // held out in front at chest height, riding the carrier's jump height
     Position.x[eid] = Position.x[carrier] + Math.sin(Yaw.v[carrier]) * CARRY_FORWARD;
-    Position.y[eid] = CARRY_HEIGHT;
+    Position.y[eid] = Position.y[carrier] + CARRY_HEIGHT;
     Position.z[eid] = Position.z[carrier] + Math.cos(Yaw.v[carrier]) * CARRY_FORWARD;
     Yaw.v[eid] = Yaw.v[carrier];
   }
@@ -92,7 +127,7 @@ export function ballisticSystem(dt: number): void {
       vz: Airborne.vz[eid],
       resting: false,
     };
-    stepBallistic(b, dt);
+    stepBallistic(b, dt, simWorld ?? undefined);
     Position.x[eid] = b.x;
     Position.y[eid] = b.y;
     Position.z[eid] = b.z;
@@ -154,9 +189,12 @@ export function dropCarried(): void {
   const eid = carriedPropEid(player);
   if (!eid) return;
   removeComponent(world, CarriedBy, eid);
-  Position.x[eid] = Position.x[player] + Math.sin(Yaw.v[player]) * 0.7;
-  Position.z[eid] = Position.z[player] + Math.cos(Yaw.v[player]) * 0.7;
-  Position.y[eid] = PROP_REST_Y;
+  const dx = Position.x[player] + Math.sin(Yaw.v[player]) * 0.7;
+  const dz = Position.z[player] + Math.cos(Yaw.v[player]) * 0.7;
+  Position.x[eid] = dx;
+  Position.z[eid] = dz;
+  Position.y[eid] =
+    (simWorld ? groundHeightAt(simWorld, dx, dz, Math.max(Position.y[player], 0), 0.05) : 0) + PROP_REST_Y;
 }
 
 /** Throw the carried prop the way the character is FACING. power in [0,1]. */
@@ -173,7 +211,7 @@ export function throwCarried(power: number): number {
   Airborne.vy[eid] = v.vy;
   Airborne.vz[eid] = v.vz;
   Position.x[eid] = Position.x[player] + dirX * 0.6;
-  Position.y[eid] = CARRY_HEIGHT;
+  Position.y[eid] = Position.y[player] + CARRY_HEIGHT;
   Position.z[eid] = Position.z[player] + dirZ * 0.6;
   lastThrower = player;
   return eid;

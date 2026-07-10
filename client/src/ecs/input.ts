@@ -11,6 +11,7 @@ export interface InputState {
   camPitch: number;
   charging: boolean;
   throwCharge: number; // 0..1, accumulated in game.step while charging
+  jump: boolean; // queued jump, consumed by movementSystem
 }
 
 export const input: InputState = {
@@ -20,6 +21,7 @@ export const input: InputState = {
   camPitch: 0.4,
   charging: false,
   throwCharge: 0,
+  jump: false,
 };
 
 export interface InputCallbacks {
@@ -37,11 +39,16 @@ export function attachInput(canvas: HTMLCanvasElement, cb: InputCallbacks): void
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
     keys.add(e.code);
+    // bindings live around WASD so the right hand never leaves the mouse
     if (e.code === "KeyE") cb.onGrab();
     if (e.code === "KeyG") cb.onDrop();
     if (e.code === "KeyT") cb.onFakeRound();
     if (e.code === "KeyQ") cb.onStun?.();
-    if (e.code === "KeyP") cb.onPlace?.();
+    if (e.code === "KeyR") cb.onPlace?.();
+    if (e.code === "Space") {
+      e.preventDefault(); // don't scroll the page
+      input.jump = true;
+    }
     if (e.code === "KeyF") {
       input.charging = true;
       input.throwCharge = 0;

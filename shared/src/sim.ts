@@ -13,7 +13,7 @@ import {
   THROW_MAX_SPEED,
   THROW_UP_RATIO,
 } from "./constants.ts";
-import { blockedAt, type World } from "./worldgen.ts";
+import { blockedAt, groundHeightAt, type World } from "./worldgen.ts";
 
 const HALF = MAP_SIZE / 2;
 
@@ -28,7 +28,7 @@ export interface Vec2 {
  * solid fixtures block — resolved per-axis so you slide along obstacles
  * instead of sticking to them.
  */
-export function stepMove(pos: Vec2, dir: Vec2, speed: number, dt: number, world?: World): Vec2 {
+export function stepMove(pos: Vec2, dir: Vec2, speed: number, dt: number, world?: World, y = 0): Vec2 {
   const len = Math.hypot(dir.x, dir.z);
   if (len < 1e-6) return { x: pos.x, z: pos.z };
   const nx = dir.x / len;
@@ -38,9 +38,9 @@ export function stepMove(pos: Vec2, dir: Vec2, speed: number, dt: number, world?
   if (world) {
     // safety net: if we're somehow ALREADY inside a collider (bad spawn, old
     // save, future bug), collision must never cage us — move freely until out
-    if (blockedAt(world, pos.x, pos.z)) return { x, z };
-    if (blockedAt(world, x, pos.z)) x = pos.x;
-    if (blockedAt(world, x, z)) z = pos.z;
+    if (blockedAt(world, pos.x, pos.z, 0, y)) return { x, z };
+    if (blockedAt(world, x, pos.z, 0, y)) x = pos.x;
+    if (blockedAt(world, x, z, 0, y)) z = pos.z;
     // movement fully blocked by a round obstacle: axis separation alone
     // sticks, so deflect along the circle's tangent (whichever side matches
     // intent). Probe the REJECTED destination — the contact can be beside the
@@ -50,6 +50,7 @@ export function stepMove(pos: Vec2, dir: Vec2, speed: number, dt: number, world?
       const probeZ = pos.z + nz * speed * dt;
       for (const s of world.solids) {
         if (Math.hypot(probeX - s.x, probeZ - s.z) >= s.r + PLAYER_RADIUS) continue;
+        if (s.h > 0 && y >= s.h - 0.05) continue; // we're on top of it
         const rx = pos.x - s.x;
         const rz = pos.z - s.z;
         const rl = Math.hypot(rx, rz) || 1;
@@ -61,7 +62,7 @@ export function stepMove(pos: Vec2, dir: Vec2, speed: number, dt: number, world?
         }
         const sx = clampToMap(pos.x + tx * speed * dt);
         const sz = clampToMap(pos.z + tz * speed * dt);
-        if (!blockedAt(world, sx, sz)) {
+        if (!blockedAt(world, sx, sz, 0, y)) {
           x = sx;
           z = sz;
         }
@@ -100,15 +101,20 @@ export function throwVelocity(dirX: number, dirZ: number, power: number): { vx: 
   };
 }
 
-/** Step a thrown prop by dt. Mutates and returns b. Stops on ground contact. */
-export function stepBallistic(b: Ballistic, dt: number): Ballistic {
+/**
+ * Step a thrown prop by dt. Mutates and returns b. Stops on ground contact —
+ * with a world, that includes standable fixture tops (a throw can land on a
+ * car roof).
+ */
+export function stepBallistic(b: Ballistic, dt: number, world?: World): Ballistic {
   if (b.resting) return b;
   b.vy -= GRAVITY * dt;
   b.x += b.vx * dt;
   b.y += b.vy * dt;
   b.z += b.vz * dt;
-  if (b.y <= PROP_REST_Y && b.vy < 0) {
-    b.y = PROP_REST_Y;
+  const ground = world ? groundHeightAt(world, b.x, b.z, Math.max(b.y, 0), 0.05) : 0;
+  if (b.y <= ground + PROP_REST_Y && b.vy < 0) {
+    b.y = ground + PROP_REST_Y;
     b.vx = 0;
     b.vy = 0;
     b.vz = 0;

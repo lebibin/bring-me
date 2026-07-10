@@ -40,7 +40,7 @@ export interface NetProp {
 export type C2S =
   | { type: "hello"; name: string; v: number }
   | { type: "start"; settings: MatchSettings }
-  | { type: "pos"; x: number; z: number; yaw: number }
+  | { type: "pos"; x: number; z: number; yaw: number; y?: number }
   | { type: "grab"; propId: number }
   | { type: "drop" }
   | { type: "throw"; dirX: number; dirZ: number; power: number }
@@ -54,6 +54,7 @@ export type C2S =
 export interface SnapshotPlayer {
   id: number;
   x: number;
+  y: number; // jump height (0 = grounded)
   z: number;
   yaw: number;
   carry: number; // propId or -1

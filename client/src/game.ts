@@ -20,6 +20,7 @@ import {
   THROW_HOLD_MS,
   GRAB_RADIUS,
   INTERP_EXTRAP_MS,
+  groundHeightAt,
   OWN_POS_BLEND_DIST,
   OWN_POS_BLEND_RATE,
   OWN_POS_SNAP_DIST,
@@ -71,11 +72,12 @@ export class Game {
   stunUntilSim = 0;
   netPhase: { name: string; endsAt: number; round?: number; totalRounds?: number } | null = null;
   private readonly remoteEids = new Map<number, number>();
-  private readonly interpBufs = new Map<number, { rt: number; x: number; z: number; yaw: number }[]>();
+  private readonly interpBufs = new Map<number, { rt: number; x: number; y: number; z: number; yaw: number }[]>();
   private readonly stunFx = new Map<number, number>(); // eid -> simTime until wobble
   private readonly walkAnim = new Map<number, { phase: number; lastX: number; lastZ: number }>();
   private readonly slapAnim = new Map<number, number>(); // eid -> simTime the slap started
   private camFocusStart = -1; // simTime the reveal camera pan began (-1 = inactive)
+  private camFocusTotal = 3; // seconds the pan covers (countdown + reveal)
   private ghost: THREE.Object3D | null = null;
   private phaseEndsAt = 0;
   private targetEid = 0;
@@ -170,11 +172,9 @@ export class Game {
     }
     if (this.ghost) {
       const e = this.playerEid;
-      this.ghost.position.set(
-        Position.x[e] + Math.sin(Yaw.v[e]) * 2,
-        PROP_REST_Y,
-        Position.z[e] + Math.cos(Yaw.v[e]) * 2,
-      );
+      const gx = Position.x[e] + Math.sin(Yaw.v[e]) * 2;
+      const gz = Position.z[e] + Math.cos(Yaw.v[e]) * 2;
+      this.ghost.position.set(gx, groundHeightAt(this.data, gx, gz, 99, 0.05) + PROP_REST_Y, gz);
     }
     for (const [eid, until] of this.stunFx) {
       const obj = object3ds.get(eid);
@@ -239,12 +239,12 @@ export class Game {
   }
 
   /** Buffer a remote player's snapshot sample (receive-time interpolation). */
-  pushRemoteSample(netId: number, x: number, z: number, yaw: number): void {
+  pushRemoteSample(netId: number, x: number, z: number, yaw: number, y = 0): void {
     const eid = this.remoteEids.get(netId);
     if (eid === undefined) return;
     const buf = this.interpBufs.get(eid);
     if (!buf) return;
-    buf.push({ rt: performance.now(), x, z, yaw });
+    buf.push({ rt: performance.now(), x, y, z, yaw });
     if (buf.length > 6) buf.shift();
   }
 
@@ -265,6 +265,7 @@ export class Game {
         }
       }
       let tx: number;
+      let ty: number;
       let tz: number;
       let tyaw: number;
       const newest = buf[buf.length - 1];
@@ -276,11 +277,13 @@ export class Game {
         const ahead = Math.min(target - newest.rt, INTERP_EXTRAP_MS);
         tx = newest.x + ((newest.x - prev.x) / seg) * ahead;
         tz = newest.z + ((newest.z - prev.z) / seg) * ahead;
+        ty = newest.y;
         tyaw = newest.yaw;
       } else {
         let t = b.rt === a.rt ? 1 : (target - a.rt) / (b.rt - a.rt);
         t = Math.min(1, Math.max(0, t));
         tx = a.x + (b.x - a.x) * t;
+        ty = a.y + (b.y - a.y) * t;
         tz = a.z + (b.z - a.z) * t;
         let dy = b.yaw - a.yaw;
         if (dy > Math.PI) dy -= Math.PI * 2;
@@ -289,6 +292,7 @@ export class Game {
       }
       // ease the rendered pose toward the computed one — hides sample pops
       Position.x[eid] += (tx - Position.x[eid]) * k;
+      Position.y[eid] += (ty - Position.y[eid]) * k;
       Position.z[eid] += (tz - Position.z[eid]) * k;
       let dyaw = tyaw - Yaw.v[eid];
       if (dyaw > Math.PI) dyaw -= Math.PI * 2;
@@ -336,9 +340,16 @@ export class Game {
       st.lastZ = obj.position.z;
       const moving = dist > 0.0008;
       const swing = moving ? Math.sin((st.phase += dist * 5.5)) * 0.6 : 0;
+      const airborne =
+        Position.y[eid] > groundHeightAt(this.data, Position.x[eid], Position.z[eid], Position.y[eid]) + 0.04;
 
-      // legs + bob always follow movement
-      if (moving) {
+      // legs + bob follow movement; airborne tucks the legs for a hop pose
+      if (airborne) {
+        const blendAir = Math.min(1, dt * 16);
+        parts.legL.rotation.x += (-0.6 - parts.legL.rotation.x) * blendAir;
+        parts.legR.rotation.x += (-0.45 - parts.legR.rotation.x) * blendAir;
+        parts.body.position.y = 0;
+      } else if (moving) {
         parts.legL.rotation.x = swing;
         parts.legR.rotation.x = -swing;
         parts.body.position.y = Math.abs(Math.sin(st.phase)) * 0.045;
@@ -349,11 +360,11 @@ export class Game {
         parts.body.position.y *= ease;
       }
 
-      // arms: hold pose while carrying, otherwise walk swing / rest
+      // arms: hold pose while carrying > airborne flail > walk swing / rest
       const carrying = carriers.has(eid);
       const blend = Math.min(1, dt * 14);
-      const targetL = carrying ? -1.15 : moving ? -swing * 0.6 : 0;
-      const targetR = carrying ? -1.15 : moving ? swing * 0.6 : 0;
+      const targetL = carrying ? -1.15 : airborne ? -0.8 : moving ? -swing * 0.6 : 0;
+      const targetR = carrying ? -1.15 : airborne ? -0.8 : moving ? swing * 0.6 : 0;
       parts.armL.rotation.x += (targetL - parts.armL.rotation.x) * blend;
       parts.armR.rotation.x += (targetR - parts.armR.rotation.x) * blend;
 
@@ -463,7 +474,9 @@ export class Game {
     }
     const mesh = buildPropMesh(prop.archetype, prop.hue, prop.scale);
     this.ctx.scene.add(mesh);
-    const eid = spawnProp(prop.propId, prop.archetype, prop.x, PROP_REST_Y * prop.scale, prop.z, 0, mesh);
+    // objects can be placed on standable fixture tops — rest on the surface
+    const surf = groundHeightAt(this.data, prop.x, prop.z, 99, 0.05);
+    const eid = spawnProp(prop.propId, prop.archetype, prop.x, surf + PROP_REST_Y * prop.scale, prop.z, 0, mesh);
     this.propEidById.set(prop.propId, eid);
   }
 
@@ -482,8 +495,32 @@ export class Game {
     if (hasComponent(world, CarriedBy, teid)) removeComponent(world, CarriedBy, teid);
     if (hasComponent(world, Airborne, teid)) removeComponent(world, Airborne, teid);
     Position.x[teid] = x;
-    Position.y[teid] = PROP_REST_Y;
+    Position.y[teid] = groundHeightAt(this.data, x, z, 99, 0.05) + PROP_REST_Y;
     Position.z[teid] = z;
+  }
+
+  /**
+   * Self-heal carry state from the server snapshot (the authoritative view):
+   * missed/raced grab-drop events can desync who is visibly holding what.
+   */
+  reconcileCarry(netId: number, serverCarry: number): void {
+    const peid = this.eidForNetId(netId);
+    if (!peid) return;
+    let clientCarry = -1;
+    let clientEid = 0;
+    for (const [propId, eid] of this.propEidById) {
+      if (hasComponent(world, CarriedBy, eid) && CarriedBy.eid[eid] === peid) {
+        clientCarry = propId;
+        clientEid = eid;
+        break;
+      }
+    }
+    if (clientCarry === serverCarry) return;
+    if (clientCarry >= 0 && clientEid) {
+      // server says this hand is empty (or holds something else) — drop ours
+      this.applyDropped(clientCarry, Position.x[peid], Position.z[peid]);
+    }
+    if (serverCarry >= 0) this.applyGrabbed(netId, serverCarry);
   }
 
   applyThrown(propId: number, x: number, y: number, z: number, vx: number, vy: number, vz: number): void {
@@ -523,32 +560,38 @@ export class Game {
     const shot = snapshotProp(archetypeIdx, hue, scale);
     this.jumbotron.setReveal(shot, buildPropMesh(archetypeIdx, hue, scale));
     announceTarget(shot);
-    this.camFocusStart = this.simTime; // pull every player's view to the screen
+  }
+
+  /** Pull the view to the jumbotron for `totalSec` (countdown + reveal). */
+  startCamFocus(totalSec: number): void {
+    this.camFocusStart = this.simTime;
+    this.camFocusTotal = totalSec;
   }
 
   /**
    * Reveal camera: ease the view from the follow cam to a shot filled by the
-   * jumbotron, hold while the target flashes, then ease back to exactly the
-   * follow-cam pose (which cameraSystem recomputes every frame, so returning
-   * players keep whatever orbit they had). Timeline matches REVEAL_MS (3s):
-   * 0.8s in, 1.4s hold, 0.8s out.
+   * jumbotron, hold from the START of the countdown through the reveal, then
+   * ease back to exactly the follow-cam pose (which cameraSystem recomputes
+   * every frame, so returning players keep whatever orbit they had).
    */
   private applyCameraFocus(): void {
     if (this.camFocusStart < 0) return;
     const t = this.simTime - this.camFocusStart;
+    const total = this.camFocusTotal;
     let k: number;
-    if (t < 0.8) k = smoothstep(t / 0.8);
-    else if (t < 2.2) k = 1;
-    else if (t < 3.0) k = 1 - smoothstep((t - 2.2) / 0.8);
+    if (t < 1.0) k = smoothstep(t / 1.0);
+    else if (t < total - 0.8) k = 1;
+    else if (t < total) k = 1 - smoothstep((t - (total - 0.8)) / 0.8);
     else {
       this.camFocusStart = -1;
       return;
     }
     const f = this.data.plaza.facing;
-    // camera floats in front of the screen; the screen face sits ~0.2m out
-    const camX = this.data.plaza.x + Math.sin(f) * 4.4;
-    const camZ = this.data.plaza.z + Math.cos(f) * 4.4;
-    const camY = 3.7;
+    // camera floats close in front of the screen (zoomed so BRING ME + the
+    // item photo are unmissable); the screen face sits ~0.2m out
+    const camX = this.data.plaza.x + Math.sin(f) * 3.6;
+    const camZ = this.data.plaza.z + Math.cos(f) * 3.6;
+    const camY = 3.8;
     const lookX = this.data.plaza.x + Math.sin(f) * 0.2;
     const lookZ = this.data.plaza.z + Math.cos(f) * 0.2;
     const lookY = 3.9;
@@ -580,6 +623,8 @@ export class Game {
     } else if (name === "COUNTDOWN") {
       clearAnnounce();
       this.clearGhost();
+      // pull the view to the screen for the whole countdown + reveal
+      this.startCamFocus((COUNTDOWN_MS + REVEAL_MS) / 1000);
     }
   }
 
@@ -649,6 +694,7 @@ export class Game {
     this.phase = "COUNTDOWN";
     this.phaseEndsAt = this.simTime + COUNTDOWN_MS / 1000;
     clearAnnounce();
+    this.startCamFocus((COUNTDOWN_MS + REVEAL_MS) / 1000);
   }
 
   targetPropId(): number {

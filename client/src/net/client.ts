@@ -92,6 +92,7 @@ export class NetClient {
     this.socket?.send({
       type: "pos",
       x: q2(Position.x[g.playerEid]),
+      y: q2(Position.y[g.playerEid]),
       z: q2(Position.z[g.playerEid]),
       yaw: q2(Yaw.v[g.playerEid]),
     });
@@ -287,10 +288,13 @@ export class NetClient {
         for (const sp of m.players) {
           if (sp.id === this.myId) {
             this.game?.reconcileOwnPos(sp.x, sp.z);
+            // self-heal own carry state unless an optimistic action is in flight
+            if (!this.pending) this.game?.reconcileCarry(sp.id, sp.carry);
             continue;
           }
           this.game?.addRemote(sp.id);
-          this.game?.pushRemoteSample(sp.id, sp.x, sp.z, sp.yaw);
+          this.game?.pushRemoteSample(sp.id, sp.x, sp.z, sp.yaw, sp.y ?? 0);
+          this.game?.reconcileCarry(sp.id, sp.carry);
         }
         for (const lp of m.loose) this.game?.applyLoose(lp.propId, lp.x, lp.y, lp.z);
         this.scores = m.scores;
@@ -333,16 +337,7 @@ export class NetClient {
 
   private startPosSender(): void {
     if (this.posTimer !== null) return;
-    this.posTimer = window.setInterval(() => {
-      const g = this.game;
-      if (!g) return;
-      this.socket?.send({
-        type: "pos",
-        x: q2(Position.x[g.playerEid]),
-        z: q2(Position.z[g.playerEid]),
-        yaw: q2(Yaw.v[g.playerEid]),
-      });
-    }, 1000 / POS_SEND_HZ);
+    this.posTimer = window.setInterval(() => this.sendPosNow(), 1000 / POS_SEND_HZ);
   }
 
   private stopPosSender(): void {
