@@ -51,6 +51,7 @@ import {
   type MatchSettings,
   type PhaseName,
   type PlayerInfo,
+  type RoomTotals,
   type S2C,
   type SnapshotLoose,
   type SnapshotPlayer,
@@ -126,6 +127,8 @@ interface Persisted {
   hostId: number;
   settings: MatchSettings;
   ttlAt: number;
+  /** cumulative standings across finished games; lives as long as the room */
+  totals: RoomTotals;
 }
 
 export class BringMeRoom {
@@ -140,6 +143,7 @@ export class BringMeRoom {
     createSecs: CREATE_SECS_DEFAULT,
     roundSecs: ROUND_SECS_DEFAULT,
   };
+  private totals: RoomTotals = {};
   private match: MatchState | null = null;
   /** propId -> runtime state for every prop that has been grabbed/moved */
   private readonly dyn = new Map<number, DynProp>();
@@ -155,6 +159,7 @@ export class BringMeRoom {
         this.hostId = stored.hostId;
         this.settings = stored.settings;
         this.ttlAt = stored.ttlAt;
+        this.totals = stored.totals ?? {};
       }
       this.match = (await this.state.storage.get<MatchState>("match")) ?? null;
       for (const ws of this.state.getWebSockets()) {
@@ -307,6 +312,7 @@ export class BringMeRoom {
       players: this.roster(),
       settings: this.settings,
       scores: this.match?.scores ?? {},
+      totals: this.totals,
     });
     // Late joiners still need every placed object to render the world.
     if (this.match) {
@@ -318,7 +324,7 @@ export class BringMeRoom {
       }
     }
     this.broadcast({ type: "playerJoined", player: this.info(this.players.get(id)!) }, id);
-    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings });
+    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
     if (this.phase() !== "LOBBY") this.ensureTick();
   }
 
@@ -346,7 +352,7 @@ export class BringMeRoom {
       this.persist();
     }
     this.broadcast({ type: "playerLeft", playerId: att.playerId });
-    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings });
+    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
     if (this.sockets.size === 0) this.stopTick();
   }
 
@@ -482,12 +488,23 @@ export class BringMeRoom {
         break;
       case "RESOLVE":
         if (advanceRound(m, now) === "end") {
-          this.broadcast({ type: "matchEnd", scores: m.scores });
+          // fold this game into the room's running standings before the
+          // match state is discarded — the lobby scoreboard shows these
+          for (const [idStr, pts] of Object.entries(m.scores)) {
+            const id = Number(idStr);
+            const prev = this.totals[id];
+            this.totals[id] = {
+              name: this.players.get(id)?.name ?? prev?.name ?? `player ${id}`,
+              pts: (prev?.pts ?? 0) + pts,
+            };
+          }
+          this.persist();
+          this.broadcast({ type: "matchEnd", scores: m.scores, totals: this.totals });
           this.match = null;
           this.dyn.clear();
           void this.state.storage.delete("match");
           this.broadcast({ type: "phase", name: "LOBBY", endsAt: 0 });
-          this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings });
+          this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
           this.stopTick();
         } else {
           this.announceRoundPhase();
@@ -895,6 +912,7 @@ export class BringMeRoom {
       hostId: this.hostId,
       settings: this.settings,
       ttlAt: this.ttlAt,
+      totals: this.totals,
     };
     void this.state.storage.put("room", data);
   }

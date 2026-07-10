@@ -18,6 +18,7 @@ import {
   type MatchSettings,
   type PhaseName,
   type PlayerInfo,
+  type RoomTotals,
   type S2C,
 } from "@bringme/shared";
 import { Game } from "../game.ts";
@@ -34,6 +35,8 @@ export class NetClient {
   serverPhase: PhaseName = "LOBBY";
   players: PlayerInfo[] = [];
   scores: Record<number, number> = {};
+  /** cumulative points across every game this room has finished */
+  totals: RoomTotals = {};
   private socket: RoomSocket | null = null;
   private posTimer: number | null = null;
   private stunCdUntil = 0;
@@ -186,6 +189,7 @@ export class NetClient {
         this.players = m.players;
         this.serverPhase = m.phase;
         this.scores = m.scores;
+        this.totals = m.totals;
         const game = new Game(this.container, m.seed);
         game.fakeRoundsEnabled = false;
         game.setLocalSpawn(this.myId);
@@ -195,7 +199,7 @@ export class NetClient {
           (sel) => this.pickAction(sel.archetype, sel.params.hue, sel.params.scale),
           () => this.placeAction(),
         );
-        this.ui.showRoom(this.code, this.players, this.isHost(), m.settings);
+        this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals);
         this.onGameReady(game);
         initSlapSounds(); // start preloading before the first stun lands
         if (this.serverPhase !== "LOBBY") this.enterLivePhase();
@@ -203,6 +207,7 @@ export class NetClient {
       }
       case "lobby":
         this.players = m.players;
+        this.totals = m.totals;
         this.ui.updatePlayers(m.players, this.isHost(), m.settings);
         for (const p of m.players) if (p.id !== this.myId) this.game?.addRemote(p.id);
         break;
@@ -222,7 +227,7 @@ export class NetClient {
           this.panel?.hide();
         }
         if (m.name === "LOBBY") {
-          this.ui.showRoom(this.code, this.players, this.isHost(), this.ui.readSettings());
+          this.ui.showRoom(this.code, this.players, this.isHost(), this.ui.readSettings(), this.totals);
           setStunCooldown(null);
         } else {
           this.ui.hide();
@@ -276,6 +281,7 @@ export class NetClient {
         break;
       case "matchEnd": {
         this.scores = m.scores;
+        this.totals = m.totals; // arrives before the LOBBY phase msg re-opens the room panel
         const rows = Object.entries(m.scores)
           .map(([id, pts]) => ({ name: this.nameOf(Number(id)), pts }))
           .sort((a, b) => b.pts - a.pts);

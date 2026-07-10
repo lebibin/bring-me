@@ -25,6 +25,12 @@ export interface PlayerInfo {
   isHost: boolean;
 }
 
+/**
+ * Cumulative standings across every finished game in this room's lifetime.
+ * Keyed by playerId; keeps the name so departed players stay on the board.
+ */
+export type RoomTotals = Record<number, { name: string; pts: number }>;
+
 /** A dynamic (player-created or loose) prop on the wire. */
 export interface NetProp {
   propId: number;
@@ -77,8 +83,9 @@ export type S2C =
       players: PlayerInfo[];
       settings: MatchSettings;
       scores: Record<number, number>;
+      totals: RoomTotals;
     }
-  | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings }
+  | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings; totals: RoomTotals }
   | {
       type: "phase";
       name: PhaseName;
@@ -108,7 +115,7 @@ export type S2C =
       deliverer?: number;
       scores: Record<number, number>;
     }
-  | { type: "matchEnd"; scores: Record<number, number> }
+  | { type: "matchEnd"; scores: Record<number, number>; totals: RoomTotals }
   | { type: "playerJoined"; player: PlayerInfo }
   | { type: "playerLeft"; playerId: number }
   | { type: "err"; code: ErrCode };

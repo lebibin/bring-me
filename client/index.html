@@ -117,6 +117,10 @@
         display: none; align-items: center; justify-content: center;
         background: rgba(10, 12, 18, 0.72); backdrop-filter: blur(4px);
       }
+      #lobby .panelRow {
+        display: flex; gap: 28px; align-items: stretch; justify-content: center;
+        flex-wrap: wrap; max-width: 96vw;
+      }
       #lobby .panel {
         background: #171a24; border: 3px solid var(--accent); border-radius: 28px;
         padding: 52px 64px; width: min(700px, 94vw);
@@ -152,6 +156,17 @@
       #lobby .settings label { flex: 1; font-size: 22px; opacity: 0.85; text-align: left; }
       #lobby .settings input { margin-top: 8px; }
       #lobby .status { font-size: 24px; min-height: 32px; color: #8892a8; }
+      #lobby .panel.scoreboard { width: min(440px, 90vw); padding: 52px 44px; gap: 18px; }
+      #lobby .scoreboard h2 { font-size: 36px; letter-spacing: 0.08em; color: var(--accent); }
+      #lobby .scoreboard ul { min-height: 0; }
+      #lobby .scoreboard li { display: flex; align-items: baseline; gap: 14px; }
+      #lobby .scoreboard .medal { width: 48px; flex: none; text-align: center; }
+      #lobby .scoreboard .sname {
+        flex: 1; text-align: left; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap;
+      }
+      #lobby .scoreboard .pts { font-weight: 800; color: var(--accent); }
+      #lobby .scoreboard .subtle { font-size: 18px; color: #8892a8; }
     </style>
   </head>
   <body>

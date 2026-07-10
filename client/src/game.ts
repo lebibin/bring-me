@@ -369,14 +369,19 @@ export class Game {
       // it backward made the jumper read as facing the wrong way.
       const carrying = carriers.has(eid);
       const blend = Math.min(1, dt * 14);
-      const targetL = carrying ? -0.85 : airborne ? 0.55 : moving ? -swing * 0.6 : 0;
-      const targetR = carrying ? -0.85 : airborne ? -2.9 : moving ? swing * 0.6 : 0;
+      // walking arms take a real stride: wider swing than the legs' 0.6x
+      // dampening used before, opposite phase to the same-side leg
+      const armSwingL = moving ? -swing * 0.9 : 0;
+      const armSwingR = moving ? swing * 0.9 : 0;
+      const targetL = carrying ? -0.85 : airborne ? 0.55 : armSwingL;
+      const targetR = carrying ? -0.85 : airborne ? -2.9 : armSwingR;
       parts.armL.rotation.x += (targetL - parts.armL.rotation.x) * blend;
       parts.armR.rotation.x += (targetR - parts.armR.rotation.x) * blend;
       // elbows: deep bend wrapping a carried object, straight for the raised
-      // jump fist, relaxed otherwise
-      const elbowL = carrying ? -0.7 : airborne ? -0.25 : -0.18;
-      const elbowR = carrying ? -0.7 : airborne ? -0.05 : -0.18;
+      // jump fist; while walking they pump — bent on the forward carry,
+      // nearly straight on the backswing (stiff arms read as sleepwalking)
+      const elbowL = carrying ? -0.7 : airborne ? -0.25 : -0.18 - Math.max(0, -armSwingL) * 0.8;
+      const elbowR = carrying ? -0.7 : airborne ? -0.05 : -0.18 - Math.max(0, -armSwingR) * 0.8;
       parts.elbowL.rotation.x += (elbowL - parts.elbowL.rotation.x) * blend;
       parts.elbowR.rotation.x += (elbowR - parts.elbowR.rotation.x) * blend;
 

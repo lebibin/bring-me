@@ -9,6 +9,7 @@ import {
   ROUND_SECS_MIN,
   type MatchSettings,
   type PlayerInfo,
+  type RoomTotals,
 } from "@bringme/shared";
 
 export interface LobbyHandlers {
@@ -55,9 +56,10 @@ export class LobbyUI {
     nameInput?.focus();
   }
 
-  showRoom(code: string, players: PlayerInfo[], isHost: boolean, settings: MatchSettings): void {
+  showRoom(code: string, players: PlayerInfo[], isHost: boolean, settings: MatchSettings, totals: RoomTotals = {}): void {
     this.root.style.display = "flex";
     this.root.innerHTML = `
+      <div class="panelRow">
       <div class="panel">
         <h1>ROOM ${code}</h1>
         <button id="lb-copy" class="ghost">copy invite link</button>
@@ -72,6 +74,8 @@ export class LobbyUI {
         </div>
         <button id="lb-start" disabled>…</button>
         <div id="lb-status" class="status"></div>
+      </div>
+      ${renderScoreboard(totals)}
       </div>`;
     this.status = this.root.querySelector("#lb-status");
     this.playerList = this.root.querySelector("#lb-players");
@@ -140,6 +144,25 @@ export class LobbyUI {
       .map((p) => `<li>${p.isHost ? "👑 " : ""}${escapeHtml(p.name)}</li>`)
       .join("");
   }
+}
+
+/**
+ * Room-lifetime standings beside the room card — only once a game has been
+ * played. Top three get their medals; everyone else gets a plain rank.
+ */
+function renderScoreboard(totals: RoomTotals): string {
+  const rows = Object.values(totals).sort((a, b) => b.pts - a.pts);
+  if (rows.length === 0) return "";
+  const line = (r: { name: string; pts: number }, i: number): string => {
+    const rank = ["🥇", "🥈", "🥉"][i] ?? `${i + 1}.`;
+    return `<li><span class="medal">${rank}</span><span class="sname">${escapeHtml(r.name)}</span><span class="pts">${Math.round(r.pts)}</span></li>`;
+  };
+  return `
+    <div class="panel scoreboard">
+      <h2>STANDINGS</h2>
+      <ul>${rows.map(line).join("")}</ul>
+      <div class="subtle">totals across games in this room</div>
+    </div>`;
 }
 
 function escapeHtml(s: string): string {
