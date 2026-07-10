@@ -5,8 +5,8 @@ MECCHA CHAMELEON twist. Everyone secretly hides an object in a shared backyard; 
 jumbotron flashes one of them and the whole lobby scrambles to find the real one among a hundred
 lookalikes and bring it home first.
 
-**▶ Play:** create a room and share the invite link — friends join straight from their browser,
-no install. *(Public URL lands with the first deploy — see [DEPLOY.md](DEPLOY.md).)*
+**▶ Play it now at [bringme.kevdashdev-cloudflare.workers.dev](https://bringme.kevdashdev-cloudflare.workers.dev/)** —
+create a room and share the invite link; friends join straight from their browser, no install.
 
 Built with **TypeScript + Three.js + bitECS** on the client and an authoritative
 **Cloudflare Worker + Durable Object** room server. No engine, no heavy assets — every model in
@@ -163,7 +163,8 @@ CI does this automatically: every push to `main` runs checks + tests and deploys
 - [x] Optimistic grab/throw/drop with server rollback; own-position reconciliation
 - [x] Slap stun with full-body animation and synchronized sound effects
 - [x] Product-shot reveals (a photo of the actual object, not a name)
-- [ ] First public deploy + custom domain
+- [x] Public deploy — one Cloudflare Worker serving client + rooms
+- [ ] Custom domain (bringme.bibin.dev)
 - [ ] Reconnect-with-token (rejoin a live match after a refresh)
 - [ ] Freeform object builder for hiders (compose from primitives)
 - [ ] Occlusion-aware hidden-in-plain-sight scoring
