@@ -51,39 +51,39 @@ export function buildBlob(hue: number): THREE.Group {
     shoulder.rotation.z = angleZ;
     // each capsule's round END CAP is centered on its joint pivot, so the cap
     // itself acts as the ball joint: bends stay smooth, no filler bulges
-    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.073, 0.2, 6, 14), mat);
-    upper.position.y = -0.1; // top cap center ON the shoulder pivot
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.083, 0.22, 6, 14), mat);
+    upper.position.y = -0.11; // top cap center ON the shoulder pivot
     shoulder.add(upper);
     const elbow = new THREE.Group();
-    elbow.position.y = -0.2; // at the upper arm's lower cap center
-    elbow.rotation.x = -0.12; // barely-there relaxed bend
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.18, 6, 14), mat);
-    fore.position.y = -0.09; // top cap center ON the elbow pivot
+    elbow.position.y = -0.33; // at the upper arm's lower cap center
+    elbow.rotation.x = -0.08; // arms hang nearly straight in the tutorial
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.079, 0.16, 6, 14), mat);
+    fore.position.y = -0.08; // top cap center ON the elbow pivot
     elbow.add(fore);
     shoulder.add(elbow);
     return { shoulder, elbow };
   };
 
+  // Proportions traced from the "How to draw MECCHA CHAMELEON" tutorial's
+  // front view: head ~20% of height, NO neck (the head nestles into the
+  // torso's narrowing top), slab trunk with hips as wide as the shoulders,
+  // arms hanging flush along the body to crotch level, thick straight legs
+  // split by a narrow notch.
   const body = new THREE.Group();
-  // slim trunk: shoulders at ~1.32, crotch at ~0.56
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.195, 0.38, 8, 18), mat);
-  torso.position.y = 0.94;
-  torso.scale.set(1.05, 1, 0.8);
-  // a subtle neck PINCH, not a pipe: short, wide, and mostly swallowed by
-  // the head/torso overlap so the figure still reads as one blob
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.1, 0.1, 12), mat);
-  neck.position.y = 1.34;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 20, 16), mat);
-  head.scale.y = 1.05;
-  head.position.y = 1.49;
-  body.add(torso, neck, head);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.4, 8, 18), mat);
+  torso.position.y = 0.97; // spans ~0.59..1.35
+  torso.scale.set(1.06, 1, 0.78);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 20, 16), mat);
+  head.scale.set(1.05, 1, 1);
+  head.position.y = 1.44; // tucked into the torso cap — the pinch IS the neck
+  body.add(torso, head);
 
-  const legL = limb(0.1, 0.44, -0.095, 0.68, -0.045);
-  const legR = limb(0.1, 0.44, 0.095, 0.68, 0.045);
-  // anchors tucked into the torso's shoulder curve so the upper arms merge
-  // with the body instead of floating beside it
-  const armLrig = arm(-0.16, 1.22, -0.12);
-  const armRrig = arm(0.16, 1.22, 0.12);
+  const legL = limb(0.12, 0.4, -0.11, 0.62, -0.02);
+  const legR = limb(0.12, 0.4, 0.11, 0.62, 0.02);
+  // arms sunk into the slab's sides — the intersection crease is the same
+  // interior line the tutorial draws to separate arm from torso
+  const armLrig = arm(-0.2, 1.21, -0.03);
+  const armRrig = arm(0.2, 1.21, 0.03);
 
   g.add(body, legL, legR, armLrig.shoulder, armRrig.shoulder);
   const parts: BlobParts = {
