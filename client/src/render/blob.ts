@@ -63,12 +63,12 @@ export function buildBlob(hue: number): THREE.Group {
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.195, 0.38, 8, 18), mat);
   torso.position.y = 0.94;
   torso.scale.set(1.05, 1, 0.8);
-  // the visible neck the reference has (and we didn't)
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.075, 0.16, 10), mat);
-  neck.position.y = 1.36;
+  // the visible neck the reference has — short, just a hint of separation
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.078, 0.11, 10), mat);
+  neck.position.y = 1.35;
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 20, 16), mat);
   head.scale.y = 1.05;
-  head.position.y = 1.53;
+  head.position.y = 1.49;
   body.add(torso, neck, head);
 
   const legL = limb(0.1, 0.44, -0.095, 0.68, -0.045);
