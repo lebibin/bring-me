@@ -1,9 +1,11 @@
 import { decodeS2C, encode, type C2S, type S2C } from "@bringme/shared";
 
 export interface SocketHandlers {
+  /** fires on every successful (re)connect — re-send `hello` here */
   onOpen(): void;
   onMsg(msg: S2C): void;
-  onClose(): void;
+  /** the socket dropped; a redial is already scheduled (attempt starts at 1) */
+  onReconnecting(attempt: number): void;
 }
 
 export function wsBase(): string {
@@ -17,36 +19,63 @@ export function wsBase(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 }
 
+/**
+ * Room socket that survives the real internet: any close/error that we did
+ * not ask for schedules a redial with jittered exponential backoff (0.8s ->
+ * 10s cap, retrying for as long as the tab lives — the room itself expires
+ * server-side). The NetClient re-hellos with its resume token on every
+ * onOpen, so a blip costs seconds, not the match.
+ */
 export class RoomSocket {
-  private readonly ws: WebSocket;
-  private open = false;
+  private ws: WebSocket | null = null;
+  private closedByUs = false;
+  private attempt = 0;
+  private redialTimer = 0;
 
-  constructor(code: string, handlers: SocketHandlers) {
-    this.ws = new WebSocket(`${wsBase()}/room/${code}`);
-    this.ws.addEventListener("open", () => {
-      this.open = true;
-      handlers.onOpen();
+  constructor(
+    private readonly code: string,
+    private readonly handlers: SocketHandlers,
+  ) {
+    this.dial();
+  }
+
+  get isOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  private dial(): void {
+    const ws = new WebSocket(`${wsBase()}/room/${this.code}`);
+    this.ws = ws;
+    ws.addEventListener("open", () => {
+      if (this.ws !== ws) return;
+      this.attempt = 0;
+      this.handlers.onOpen();
     });
-    this.ws.addEventListener("message", (ev) => {
-      if (typeof ev.data !== "string") return;
+    ws.addEventListener("message", (ev) => {
+      if (this.ws !== ws || typeof ev.data !== "string") return;
       const msg = decodeS2C(ev.data);
-      if (msg) handlers.onMsg(msg);
+      if (msg) this.handlers.onMsg(msg);
     });
-    this.ws.addEventListener("close", () => {
-      this.open = false;
-      handlers.onClose();
-    });
-    this.ws.addEventListener("error", () => {
-      this.open = false;
-      handlers.onClose();
-    });
+    const drop = (): void => {
+      if (this.ws !== ws) return; // superseded by a newer dial
+      this.ws = null;
+      if (this.closedByUs) return;
+      this.attempt += 1;
+      this.handlers.onReconnecting(this.attempt);
+      const backoff = Math.min(10000, 800 * 2 ** Math.min(this.attempt - 1, 4));
+      this.redialTimer = window.setTimeout(() => this.dial(), backoff + Math.random() * 300);
+    };
+    ws.addEventListener("close", drop);
+    ws.addEventListener("error", drop);
   }
 
   send(msg: C2S): void {
-    if (this.open) this.ws.send(encode(msg));
+    if (this.isOpen) this.ws!.send(encode(msg));
   }
 
   close(): void {
-    this.ws.close(1000, "bye");
+    this.closedByUs = true;
+    clearTimeout(this.redialTimer);
+    this.ws?.close(1000, "bye");
   }
 }

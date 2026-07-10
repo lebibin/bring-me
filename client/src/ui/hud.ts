@@ -90,6 +90,35 @@ export function setStunCooldown(secondsLeft: number | null): void {
   }
 }
 
+const netEl = document.getElementById("netInd") as HTMLDivElement;
+
+/**
+ * Signal-bars latency meter: 4 green bars on a snappy link, fewer/warmer as
+ * RTT climbs, 0 bars + blink while reconnecting (rtt = -1). null hides it
+ * (sandbox / not yet connected).
+ */
+export function setPing(rtt: number | null): void {
+  if (rtt === null) {
+    netEl.style.display = "none";
+    return;
+  }
+  netEl.style.display = "flex";
+  const bars = netEl.querySelectorAll<HTMLSpanElement>(".b");
+  const msEl = netEl.querySelector<HTMLSpanElement>(".ms");
+  if (!msEl) return;
+  if (rtt < 0) {
+    netEl.classList.add("down");
+    bars.forEach((b) => (b.className = "b"));
+    msEl.textContent = "…";
+    return;
+  }
+  netEl.classList.remove("down");
+  const lit = rtt < 90 ? 4 : rtt < 170 ? 3 : rtt < 280 ? 2 : 1;
+  const tone = lit >= 3 ? "good" : lit === 2 ? "mid" : "bad";
+  bars.forEach((b, i) => (b.className = i < lit ? `b on ${tone}` : "b"));
+  msEl.textContent = `${Math.round(Math.min(rtt, 999))}ms`;
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }

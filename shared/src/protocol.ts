@@ -44,7 +44,9 @@ export interface NetProp {
 // ---------- C2S ----------
 
 export type C2S =
-  | { type: "hello"; name: string; v: number }
+  | { type: "hello"; name: string; v: number; resume?: string }
+  /** keepalive + RTT probe; answered by the DO's auto-response without waking it */
+  | { type: "ping" }
   | { type: "start"; settings: MatchSettings }
   | { type: "pos"; x: number; z: number; yaw: number; y?: number }
   | { type: "grab"; propId: number }
@@ -84,7 +86,10 @@ export type S2C =
       settings: MatchSettings;
       scores: Record<number, number>;
       totals: RoomTotals;
+      /** opaque token — present it in `hello.resume` to reclaim this playerId */
+      resume: string;
     }
+  | { type: "pong" }
   | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings; totals: RoomTotals }
   | {
       type: "phase";

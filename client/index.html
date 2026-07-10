@@ -68,6 +68,25 @@
       }
       #cooldown.ready { color: #7dd87d; }
 
+      /* signal-bars latency meter, above the stun cooldown */
+      #netInd {
+        bottom: 88px; right: 20px; background: var(--panel);
+        border-radius: 12px; padding: 12px 16px; display: none;
+        align-items: flex-end; gap: 5px;
+      }
+      #netInd .b { width: 8px; background: #3a4154; border-radius: 2px; }
+      #netInd .b:nth-child(1) { height: 10px; }
+      #netInd .b:nth-child(2) { height: 17px; }
+      #netInd .b:nth-child(3) { height: 24px; }
+      #netInd .b:nth-child(4) { height: 31px; }
+      #netInd .b.on.good { background: #7dd87d; }
+      #netInd .b.on.mid { background: #ffb03f; }
+      #netInd .b.on.bad { background: #ff5d5d; }
+      #netInd .ms { font-size: 18px; color: #8892a8; margin-left: 8px; min-width: 62px; text-align: right; }
+      #netInd.down .ms { color: #ff5d5d; }
+      #netInd.down { animation: netblink 1s ease-in-out infinite; }
+      @keyframes netblink { 50% { opacity: 0.45; } }
+
       #fsBtn {
         position: fixed; top: 16px; left: 16px; z-index: 15;
         background: var(--panel); color: var(--ink); border: 1px solid #333a4d;
@@ -180,6 +199,10 @@
     <div id="toast" class="hud"></div>
     <div id="scores" class="hud"></div>
     <div id="cooldown" class="hud"></div>
+    <div id="netInd" class="hud">
+      <span class="b"></span><span class="b"></span><span class="b"></span><span class="b"></span>
+      <span class="ms"></span>
+    </div>
     <div id="createPanel" class="hud"></div>
     <div id="chargeWrap" class="hud"><div id="charge"></div></div>
     <div id="help" class="hud">

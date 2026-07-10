@@ -40,6 +40,8 @@ export interface BringMeHook {
   plaza(): { x: number; z: number; facing: number };
   createdProps(): { propId: number; x: number; z: number }[];
   net?: {
+    /** the live NetClient — reconnect/latency tests reach the socket via this */
+    raw(): NetClient;
     myId(): number;
     phase(): string;
     players(): { id: number; name: string; isHost: boolean }[];
@@ -122,6 +124,7 @@ export function installHook(game: Game, net?: NetClient): void {
     ...(net
       ? {
           net: {
+            raw: () => net,
             myId: () => net.myId,
             phase: () => net.serverPhase,
             players: () => net.players,

@@ -26,7 +26,7 @@ import { Position, Yaw } from "../ecs/components.ts";
 import { RoomSocket } from "./socket.ts";
 import { initSlapSounds, playSlapSound } from "../audio.ts";
 import { CreatePanel } from "../ui/createPanel.ts";
-import { setScores, setStunCooldown, toast } from "../ui/hud.ts";
+import { setPing, setScores, setStunCooldown, toast } from "../ui/hud.ts";
 import type { LobbyUI } from "../ui/lobby.ts";
 
 export class NetClient {
@@ -41,6 +41,10 @@ export class NetClient {
   private posTimer: number | null = null;
   private stunCdUntil = 0;
   private panel: CreatePanel | null = null;
+  /** token that reclaims our playerId after a drop; survives reloads too */
+  private resume: string | null = null;
+  private pingTimer: number | null = null;
+  private pingSentAt = 0; // performance.now() of the probe in flight; 0 = none
   /**
    * One optimistic action in flight at a time. Applied locally the instant
    * the key is pressed; the server's broadcast confirms it (idempotent
@@ -61,16 +65,30 @@ export class NetClient {
 
   connect(): void {
     this.ui.setStatus("connecting…");
+    try {
+      this.resume = sessionStorage.getItem(`bringme_resume_${this.code}`);
+    } catch {
+      /* storage blocked — resume only survives within this page's lifetime */
+    }
     this.socket = new RoomSocket(this.code, {
       onOpen: () => {
-        this.socket?.send({ type: "hello", name: this.name, v: PROTOCOL_VERSION });
+        this.socket?.send({
+          type: "hello",
+          name: this.name,
+          v: PROTOCOL_VERSION,
+          ...(this.resume ? { resume: this.resume } : {}),
+        });
       },
       onMsg: (m) => this.onMsg(m),
-      onClose: () => {
+      onReconnecting: (attempt) => {
         this.stopPosSender();
-        this.ui.setStatus("disconnected — reload to rejoin");
+        this.pingSentAt = 0;
+        setPing(-1);
+        if (attempt === 1) toast("connection lost — reconnecting…", 2400);
+        this.ui.setStatus(`reconnecting… (try ${attempt})`);
       },
     });
+    this.startPingLoop();
   }
 
   isHost(): boolean {
@@ -190,6 +208,21 @@ export class NetClient {
         this.serverPhase = m.phase;
         this.scores = m.scores;
         this.totals = m.totals;
+        this.saveResume(m.resume);
+        if (this.game) {
+          // reconnected mid-session: keep the running Game (a second init
+          // would double every listener) and just resync room state; the
+          // server re-sends propAdded/phase, snapshots self-heal the rest
+          for (const p of m.players) if (p.id !== this.myId) this.game.addRemote(p.id);
+          toast("reconnected ✓", 1600);
+          if (this.serverPhase !== "LOBBY") {
+            this.enterLivePhase();
+          } else {
+            this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals);
+          }
+          this.sendPing();
+          break;
+        }
         const game = new Game(this.container, m.seed);
         game.fakeRoundsEnabled = false;
         game.setLocalSpawn(this.myId);
@@ -203,8 +236,15 @@ export class NetClient {
         this.onGameReady(game);
         initSlapSounds(); // start preloading before the first stun lands
         if (this.serverPhase !== "LOBBY") this.enterLivePhase();
+        this.sendPing(); // first latency reading right away
         break;
       }
+      case "pong":
+        if (this.pingSentAt !== 0) {
+          setPing(performance.now() - this.pingSentAt);
+          this.pingSentAt = 0;
+        }
+        break;
       case "lobby":
         this.players = m.players;
         this.totals = m.totals;
@@ -334,6 +374,37 @@ export class NetClient {
       .map((p) => ({ name: p.name, pts: this.scores[p.id], me: p.id === this.myId }))
       .sort((a, b) => b.pts - a.pts);
     setScores(rows);
+  }
+
+  private saveResume(token: string): void {
+    this.resume = token;
+    try {
+      sessionStorage.setItem(`bringme_resume_${this.code}`, token);
+    } catch {
+      /* storage blocked */
+    }
+  }
+
+  // ---- keepalive + latency probe ----
+  // One ping in flight at a time, every 3s, in EVERY phase — the lobby used
+  // to sit fully silent, which is exactly when idle timeouts cut long-haul
+  // players. The DO answers via auto-response without waking up.
+
+  private startPingLoop(): void {
+    if (this.pingTimer !== null) return;
+    this.pingTimer = window.setInterval(() => this.sendPing(), 3000);
+  }
+
+  private sendPing(): void {
+    if (!this.socket?.isOpen) return;
+    const now = performance.now();
+    if (this.pingSentAt !== 0 && now - this.pingSentAt > 6000) {
+      setPing(9999); // pong lost — show the worst bar while we keep probing
+      this.pingSentAt = 0;
+    }
+    if (this.pingSentAt !== 0) return;
+    this.pingSentAt = now;
+    this.socket.send({ type: "ping" });
   }
 
   private enterLivePhase(): void {

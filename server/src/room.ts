@@ -129,6 +129,8 @@ interface Persisted {
   ttlAt: number;
   /** cumulative standings across finished games; lives as long as the room */
   totals: RoomTotals;
+  /** resume token -> the player it reclaims; lets a dropped socket rejoin as itself */
+  resumeTokens: Record<string, { id: number; name: string }>;
 }
 
 export class BringMeRoom {
@@ -144,6 +146,7 @@ export class BringMeRoom {
     roundSecs: ROUND_SECS_DEFAULT,
   };
   private totals: RoomTotals = {};
+  private resumeTokens: Record<string, { id: number; name: string }> = {};
   private match: MatchState | null = null;
   /** propId -> runtime state for every prop that has been grabbed/moved */
   private readonly dyn = new Map<number, DynProp>();
@@ -151,6 +154,11 @@ export class BringMeRoom {
   private worldCache: World | null = null;
 
   constructor(private readonly state: DurableObjectState) {
+    // keepalive: the edge/NATs kill idle WebSockets (lobbies send nothing for
+    // minutes) — answer pings in the runtime without ever waking the DO
+    this.state.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair(encode({ type: "ping" }), encode({ type: "pong" })),
+    );
     this.state.blockConcurrencyWhile(async () => {
       const stored = await this.state.storage.get<Persisted>("room");
       if (stored) {
@@ -160,6 +168,7 @@ export class BringMeRoom {
         this.settings = stored.settings;
         this.ttlAt = stored.ttlAt;
         this.totals = stored.totals ?? {};
+        this.resumeTokens = stored.resumeTokens ?? {};
       }
       this.match = (await this.state.storage.get<MatchState>("match")) ?? null;
       for (const ws of this.state.getWebSockets()) {
@@ -208,6 +217,11 @@ export class BringMeRoom {
     if (typeof raw !== "string" || raw.length > 4096) return;
     const msg = decodeC2S(raw);
     if (!msg) return;
+    // normally answered by the auto-response pair without reaching us
+    if (msg.type === "ping") {
+      this.say(ws, { type: "pong" });
+      return;
+    }
     const att = ws.deserializeAttachment() as Attachment | null;
     if (!att) {
       if (msg.type === "hello") this.onHello(ws, msg);
@@ -289,20 +303,45 @@ export class BringMeRoom {
       ws.close(1008, "protocol version mismatch");
       return;
     }
-    if (this.players.size >= MAX_PLAYERS) {
+    // A valid resume token reclaims the caller's old seat — same playerId,
+    // same scores, still a match participant. Everything else joins fresh.
+    const resumed = msg.resume ? this.resumeTokens[msg.resume] : undefined;
+    if (!resumed && this.players.size >= MAX_PLAYERS) {
       this.say(ws, { type: "err", code: "full" });
       ws.close(1008, "room full");
       return;
     }
-    const name = String(msg.name).trim().slice(0, 16) || "slop";
-    const id = this.nextId++;
+    let id: number;
+    let name: string;
+    let token: string;
+    if (resumed) {
+      id = resumed.id;
+      name = resumed.name;
+      token = msg.resume!;
+      // a half-open zombie socket may still hold the seat — supersede it
+      const old = this.sockets.get(id);
+      if (old && old !== ws) {
+        try {
+          old.close(1000, "superseded by reconnect");
+        } catch {
+          /* already dead */
+        }
+        this.sockets.delete(id);
+      }
+    } else {
+      name = String(msg.name).trim().slice(0, 16) || "slop";
+      id = this.nextId++;
+      token = crypto.randomUUID();
+      this.resumeTokens[token] = { id, name };
+    }
     if (this.hostId === 0) this.hostId = id;
     if (this.seed === 0) this.seed = (Math.random() * 0xffffffff) >>> 0;
     this.persist();
 
     ws.serializeAttachment({ playerId: id, name } satisfies Attachment);
     this.sockets.set(id, ws);
-    this.players.set(id, this.freshPlayer(id, name));
+    // keep live state (position, carry) when superseding; respawn otherwise
+    if (!this.players.has(id)) this.players.set(id, this.freshPlayer(id, name));
 
     this.say(ws, {
       type: "welcome",
@@ -313,6 +352,7 @@ export class BringMeRoom {
       settings: this.settings,
       scores: this.match?.scores ?? {},
       totals: this.totals,
+      resume: token,
     });
     // Late joiners still need every placed object to render the world.
     if (this.match) {
@@ -493,8 +533,9 @@ export class BringMeRoom {
           for (const [idStr, pts] of Object.entries(m.scores)) {
             const id = Number(idStr);
             const prev = this.totals[id];
+            const tokenName = Object.values(this.resumeTokens).find((t) => t.id === id)?.name;
             this.totals[id] = {
-              name: this.players.get(id)?.name ?? prev?.name ?? `player ${id}`,
+              name: this.players.get(id)?.name ?? prev?.name ?? tokenName ?? `player ${id}`,
               pts: (prev?.pts ?? 0) + pts,
             };
           }
@@ -913,6 +954,7 @@ export class BringMeRoom {
       settings: this.settings,
       ttlAt: this.ttlAt,
       totals: this.totals,
+      resumeTokens: this.resumeTokens,
     };
     void this.state.storage.put("room", data);
   }
