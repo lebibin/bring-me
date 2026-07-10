@@ -78,6 +78,7 @@ export class Game {
   private readonly slapAnim = new Map<number, number>(); // eid -> simTime the slap started
   private camFocusStart = -1; // simTime the reveal camera pan began (-1 = inactive)
   private camFocusTotal = 3; // seconds the pan covers (countdown + reveal)
+  private camFocusWideAt = 2; // seconds in when the slow zoom-out begins (reveal start)
   private ghost: THREE.Object3D | null = null;
   private phaseEndsAt = 0;
   private targetEid = 0;
@@ -565,17 +566,19 @@ export class Game {
     announceTarget(shot);
   }
 
-  /** Pull the view to the jumbotron for `totalSec` (countdown + reveal). */
-  startCamFocus(totalSec: number): void {
+  /** Pull the view to the jumbotron for `totalSec`; zoom out at `wideAtSec`. */
+  startCamFocus(totalSec: number, wideAtSec = totalSec): void {
     this.camFocusStart = this.simTime;
     this.camFocusTotal = totalSec;
+    this.camFocusWideAt = wideAtSec;
   }
 
   /**
-   * Reveal camera: ease the view from the follow cam to a shot filled by the
-   * jumbotron, hold from the START of the countdown through the reveal, then
-   * ease back to exactly the follow-cam pose (which cameraSystem recomputes
-   * every frame, so returning players keep whatever orbit they had).
+   * Reveal camera: ease to a close-up of the jumbotron for the countdown,
+   * then — as the reveal starts — slowly pull back to a wider framing that
+   * fits the screen AND the spinning 3D preview of the target in one shot,
+   * then ease back to exactly the follow-cam pose (which cameraSystem
+   * recomputes every frame, so returning players keep their orbit).
    */
   private applyCameraFocus(): void {
     if (this.camFocusStart < 0) return;
@@ -589,15 +592,17 @@ export class Game {
       this.camFocusStart = -1;
       return;
     }
+    // u: 0 = countdown close-up, 1 = wide reveal shot (screen + 3D preview)
+    const u = smoothstep((t - this.camFocusWideAt) / 1.6);
     const f = this.data.plaza.facing;
-    // camera floats close in front of the screen (zoomed so BRING ME + the
-    // item photo are unmissable); the screen face sits ~0.2m out
-    const camX = this.data.plaza.x + Math.sin(f) * 3.6;
-    const camZ = this.data.plaza.z + Math.cos(f) * 3.6;
-    const camY = 3.8;
-    const lookX = this.data.plaza.x + Math.sin(f) * 0.2;
-    const lookZ = this.data.plaza.z + Math.cos(f) * 0.2;
-    const lookY = 3.9;
+    const dist = 3.6 + (7.4 - 3.6) * u;
+    const camX = this.data.plaza.x + Math.sin(f) * dist;
+    const camZ = this.data.plaza.z + Math.cos(f) * dist;
+    const camY = 3.8 + (3.0 - 3.8) * u;
+    const lookAhead = 0.2 + 0.6 * u;
+    const lookX = this.data.plaza.x + Math.sin(f) * lookAhead;
+    const lookZ = this.data.plaza.z + Math.cos(f) * lookAhead;
+    const lookY = 3.9 + (3.0 - 3.9) * u;
     const cam = this.ctx.camera;
     // cameraSystem just wrote the follow pose — blend from it toward the screen
     cam.position.set(
@@ -626,8 +631,8 @@ export class Game {
     } else if (name === "COUNTDOWN") {
       clearAnnounce();
       this.clearGhost();
-      // pull the view to the screen for the whole countdown + reveal
-      this.startCamFocus((COUNTDOWN_MS + REVEAL_MS) / 1000);
+      // pull in for the countdown, widen when the reveal starts
+      this.startCamFocus((COUNTDOWN_MS + REVEAL_MS) / 1000, COUNTDOWN_MS / 1000);
     }
   }
 
@@ -697,7 +702,7 @@ export class Game {
     this.phase = "COUNTDOWN";
     this.phaseEndsAt = this.simTime + COUNTDOWN_MS / 1000;
     clearAnnounce();
-    this.startCamFocus((COUNTDOWN_MS + REVEAL_MS) / 1000);
+    this.startCamFocus((COUNTDOWN_MS + REVEAL_MS) / 1000, COUNTDOWN_MS / 1000);
   }
 
   targetPropId(): number {
