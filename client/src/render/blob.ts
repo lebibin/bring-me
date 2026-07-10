@@ -45,38 +45,39 @@ export function buildBlob(hue: number): THREE.Group {
     const shoulder = new THREE.Group();
     shoulder.position.set(ax, ay, 0);
     shoulder.rotation.z = angleZ;
-    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.072, 0.2, 6, 14), mat);
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.074, 0.2, 6, 14), mat);
     upper.position.y = -0.143; // top tip sunk into the shoulder
     shoulder.add(upper);
     const elbow = new THREE.Group();
     elbow.position.y = -0.27; // at the lower end of the upper arm
     elbow.rotation.x = -0.18; // relaxed natural bend
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.18, 6, 14), mat);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.18, 6, 14), mat);
     fore.position.y = -0.125;
     elbow.add(fore);
     shoulder.add(elbow);
     return { shoulder, elbow };
   };
 
+  // Human-ish balance: thighs ~1.3x the arms (not 1.5x+), trunk slimmer than
+  // before, hips narrower than shoulders.
   const body = new THREE.Group();
-  // slim trunk: shoulders at ~1.32, crotch at ~0.56
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.195, 0.38, 8, 18), mat);
-  torso.position.y = 0.94;
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.175, 0.38, 8, 18), mat);
+  torso.position.y = 0.94; // spans ~0.59..1.29
   torso.scale.set(1.05, 1, 0.8);
   // the visible neck the reference has — short, just a hint of separation
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.078, 0.11, 10), mat);
-  neck.position.y = 1.35;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 20, 16), mat);
+  neck.position.y = 1.32;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.155, 20, 16), mat);
   head.scale.y = 1.05;
-  head.position.y = 1.49;
+  head.position.y = 1.45;
   body.add(torso, neck, head);
 
-  const legL = limb(0.1, 0.44, -0.095, 0.68, -0.045);
-  const legR = limb(0.1, 0.44, 0.095, 0.68, 0.045);
+  const legL = limb(0.09, 0.46, -0.085, 0.64, -0.045);
+  const legR = limb(0.09, 0.46, 0.085, 0.64, 0.045);
   // anchors tucked into the torso's shoulder curve so the upper arms merge
   // with the body instead of floating beside it
-  const armLrig = arm(-0.16, 1.22, -0.12);
-  const armRrig = arm(0.16, 1.22, 0.12);
+  const armLrig = arm(-0.145, 1.18, -0.12);
+  const armRrig = arm(0.145, 1.18, 0.12);
 
   g.add(body, legL, legR, armLrig.shoulder, armRrig.shoulder);
   const parts: BlobParts = {
