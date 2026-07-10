@@ -145,7 +145,8 @@ export class Game {
     setCharge(input.charging, input.throwCharge);
     cameraSystem(this.ctx.camera);
     this.applyCameraFocus();
-    this.npcObj.position.y = Math.sin(this.simTime * 2.2) * 0.06;
+    // NPC stands ON the plaza pad (0.1 tall); the idle bob never dips below it
+    this.npcObj.position.y = 0.1 + (Math.sin(this.simTime * 2.2) * 0.5 + 0.5) * 0.07;
     // "deliver here" arrow: visible while you carry, bouncing and spinning
     this.npcArrow.visible = this.carry() >= 0;
     if (this.npcArrow.visible) {
@@ -343,11 +344,12 @@ export class Game {
       const airborne =
         Position.y[eid] > groundHeightAt(this.data, Position.x[eid], Position.z[eid], Position.y[eid]) + 0.04;
 
-      // legs + bob follow movement; airborne tucks the legs for a hop pose
+      // legs + bob follow movement; airborne strikes the Mario pose — front
+      // knee driven up, back leg kicked out behind
       if (airborne) {
-        const blendAir = Math.min(1, dt * 16);
-        parts.legL.rotation.x += (-0.6 - parts.legL.rotation.x) * blendAir;
-        parts.legR.rotation.x += (-0.45 - parts.legR.rotation.x) * blendAir;
+        const blendAir = Math.min(1, dt * 18);
+        parts.legL.rotation.x += (-1.05 - parts.legL.rotation.x) * blendAir;
+        parts.legR.rotation.x += (0.75 - parts.legR.rotation.x) * blendAir;
         parts.body.position.y = 0;
       } else if (moving) {
         parts.legL.rotation.x = swing;
@@ -360,11 +362,12 @@ export class Game {
         parts.body.position.y *= ease;
       }
 
-      // arms: hold pose while carrying > airborne flail > walk swing / rest
+      // arms: hold pose while carrying > Mario jump (fist punched skyward,
+      // other arm swung down-back) > walk swing / rest
       const carrying = carriers.has(eid);
       const blend = Math.min(1, dt * 14);
-      const targetL = carrying ? -1.15 : airborne ? -0.8 : moving ? -swing * 0.6 : 0;
-      const targetR = carrying ? -1.15 : airborne ? -0.8 : moving ? swing * 0.6 : 0;
+      const targetL = carrying ? -1.15 : airborne ? 0.55 : moving ? -swing * 0.6 : 0;
+      const targetR = carrying ? -1.15 : airborne ? 2.95 : moving ? swing * 0.6 : 0;
       parts.armL.rotation.x += (targetL - parts.armL.rotation.x) * blend;
       parts.armR.rotation.x += (targetR - parts.armR.rotation.x) * blend;
 

@@ -151,6 +151,7 @@ export function blockedAt(w: World, x: number, z: number, margin = 0, y = 0): bo
 export function groundHeightAt(w: World, x: number, z: number, fromY: number, stepUp = 0.35): number {
   let best = 0;
   if (insideRect(w.deck, x, z)) best = 0.28; // deck planks are walk-on
+  if (Math.hypot(x - w.plaza.x, z - w.plaza.z) < 4) best = Math.max(best, 0.1); // plaza pad
   for (const s of w.solids) {
     if (s.h <= 0 || s.h > best) {
       if (s.h > 0 && s.h <= fromY + stepUp && Math.hypot(x - s.x, z - s.z) < s.r + PLAYER_RADIUS * 0.6) {
