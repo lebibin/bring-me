@@ -10,6 +10,7 @@ import {
   stepBallistic,
   stepMove,
   throwVelocity,
+  type World,
 } from "@bringme/shared";
 import { Airborne, CarriedBy, Carryable, LocalTag, Position, Prop, Yaw } from "./components.ts";
 import { world, object3ds } from "./world.ts";
@@ -24,6 +25,12 @@ const renderQ = defineQuery([Position, Yaw]);
 export function localEid(): number {
   const eids = localQ(world);
   return eids.length > 0 ? eids[0] : 0;
+}
+
+/** The generated world used for movement collision (set once at game boot). */
+let simWorld: World | null = null;
+export function setSimWorld(w: World): void {
+  simWorld = w;
 }
 
 /** propId of the prop carried by this player, or -1. */
@@ -49,6 +56,7 @@ export function movementSystem(dt: number): void {
     { x: dirX, z: dirZ },
     speed,
     dt,
+    simWorld ?? undefined,
   );
   Position.x[eid] = next.x;
   Position.z[eid] = next.z;

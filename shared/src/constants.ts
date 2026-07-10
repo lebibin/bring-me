@@ -4,15 +4,23 @@ export const PROTOCOL_VERSION = 1;
 export const TICK_HZ = 15;
 export const TICK_MS = 1000 / TICK_HZ;
 export const POS_SEND_HZ = 15;
-export const INTERP_DELAY_MS = 100; // remote-player render delay (jitter buffer)
+// Remote-player render delay (jitter buffer): ~2.5 snapshot intervals. 100ms
+// proved too tight over real internet — any jitter emptied the buffer and
+// froze remotes between samples.
+export const INTERP_DELAY_MS = 160;
+// If the buffer still runs dry, extrapolate along the last velocity for at
+// most this long instead of freezing in place.
+export const INTERP_EXTRAP_MS = 120;
 
-// Own-position reconciliation against server snapshots. Normal report lag at
-// full sprint is ~0.4 m, so the dead zone must sit above that; beyond it we
-// blend, and past the snap distance (teleport-grade divergence: server clamp,
-// stun freeze) we hard-correct.
-export const OWN_POS_BLEND_DIST = 0.9;
-export const OWN_POS_SNAP_DIST = 3;
-export const OWN_POS_BLEND_RATE = 0.2; // per snapshot
+// Own-position reconciliation against server snapshots. The server's view
+// lags by network latency + one report + one snapshot interval — at sprint
+// speed over the internet that's easily 1-1.5 m, so the dead zone must sit
+// WELL above it or every snapshot rubber-bands the local player ("stutter
+// steps"). Movement is client-simulated anyway; this only needs to catch
+// clamp/teleport-grade divergence.
+export const OWN_POS_BLEND_DIST = 2.5;
+export const OWN_POS_SNAP_DIST = 6;
+export const OWN_POS_BLEND_RATE = 0.15; // per snapshot
 
 // --- World ---
 export const MAP_SIZE = 60; // meters, square, centered on origin

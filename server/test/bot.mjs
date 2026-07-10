@@ -93,13 +93,18 @@ try {
   );
   assert(true, `A sees B at x=${snapA.players.find((p) => p.id === 2).x} (walked ~3.5)`);
 
-  // teleport must be clamped
+  // teleport must be clamped — only look at snapshots that arrive AFTER the
+  // teleport (waitFor scans the whole buffer, and the first-ever snapshot has
+  // B at its seed-dependent spawn point)
+  a.msgs.length = 0;
   b.ws.send(JSON.stringify({ type: "pos", x: 25, z: -20, yaw: 0 }));
-  await sleep(200);
+  await sleep(300);
   const snap2 = await waitFor(a, (m) => m.type === "snapshot", "snapshot after teleport");
   const bp = snap2.players.find((p) => p.id === 2);
+  // clamp allows at most PLAYER_SPEED * 1s * slack per report (~9 m worst case
+  // with real latency gaps) — a real teleport would show ~29 m
   const jump = Math.hypot(bp.x - 3.5, bp.z - 0);
-  assert(jump < 5, `teleport clamped (moved ${jump.toFixed(2)} m, not ~30)`);
+  assert(jump < 10, `teleport clamped (moved ${jump.toFixed(2)} m, not ~30)`);
 
   // leave -> playerLeft
   b.ws.close(1000, "bye");

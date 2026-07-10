@@ -18,8 +18,8 @@ import {
   RESOLVE_MS,
   REVEAL_MS,
   THROW_HOLD_MS,
-  CREATED_PROP_ID_BASE,
   GRAB_RADIUS,
+  INTERP_EXTRAP_MS,
   OWN_POS_BLEND_DIST,
   OWN_POS_BLEND_RATE,
   OWN_POS_SNAP_DIST,
@@ -46,6 +46,7 @@ import {
   localEid,
   movementSystem,
   renderSyncSystem,
+  setSimWorld,
   throwCarried,
   tryGrab,
 } from "./ecs/systems.ts";
@@ -83,6 +84,7 @@ export class Game {
 
   constructor(container: HTMLElement, seed: number) {
     this.data = generateWorld(seed);
+    setSimWorld(this.data); // movement collides with the world's solid fixtures
     this.ctx = createScene(container);
     buildStatics(this.ctx.scene, this.data);
 
@@ -136,7 +138,7 @@ export class Game {
   /** step + camera + visuals + draw; called from the RAF loop. */
   frame(dt: number): void {
     this.step(dt);
-    this.interpolateRemotes(performance.now());
+    this.interpolateRemotes(performance.now(), dt);
     this.animateWalk(dt);
     setCharge(input.charging, input.throwCharge);
     cameraSystem(this.ctx.camera);
@@ -247,8 +249,10 @@ export class Game {
   }
 
   /** Public for the test hook — applies interp without a render pass. */
-  interpolateRemotes(now: number): void {
+  interpolateRemotes(now: number, dt = 1 / 60): void {
     const target = now - INTERP_DELAY_MS;
+    // exponential smoothing factor (frame-rate independent)
+    const k = 1 - Math.exp(-dt * 14);
     for (const [eid, buf] of this.interpBufs) {
       if (buf.length === 0) continue;
       let a = buf[0];
@@ -260,14 +264,36 @@ export class Game {
           break;
         }
       }
-      let t = b.rt === a.rt ? 1 : (target - a.rt) / (b.rt - a.rt);
-      t = Math.min(1, Math.max(0, t));
-      Position.x[eid] = a.x + (b.x - a.x) * t;
-      Position.z[eid] = a.z + (b.z - a.z) * t;
-      let dy = b.yaw - a.yaw;
-      if (dy > Math.PI) dy -= Math.PI * 2;
-      if (dy < -Math.PI) dy += Math.PI * 2;
-      Yaw.v[eid] = a.yaw + dy * t;
+      let tx: number;
+      let tz: number;
+      let tyaw: number;
+      const newest = buf[buf.length - 1];
+      if (target > newest.rt && buf.length >= 2) {
+        // buffer ran dry (network jitter): extrapolate along the last segment's
+        // velocity for a bounded window instead of freezing in place
+        const prev = buf[buf.length - 2];
+        const seg = Math.max(1, newest.rt - prev.rt);
+        const ahead = Math.min(target - newest.rt, INTERP_EXTRAP_MS);
+        tx = newest.x + ((newest.x - prev.x) / seg) * ahead;
+        tz = newest.z + ((newest.z - prev.z) / seg) * ahead;
+        tyaw = newest.yaw;
+      } else {
+        let t = b.rt === a.rt ? 1 : (target - a.rt) / (b.rt - a.rt);
+        t = Math.min(1, Math.max(0, t));
+        tx = a.x + (b.x - a.x) * t;
+        tz = a.z + (b.z - a.z) * t;
+        let dy = b.yaw - a.yaw;
+        if (dy > Math.PI) dy -= Math.PI * 2;
+        if (dy < -Math.PI) dy += Math.PI * 2;
+        tyaw = a.yaw + dy * t;
+      }
+      // ease the rendered pose toward the computed one — hides sample pops
+      Position.x[eid] += (tx - Position.x[eid]) * k;
+      Position.z[eid] += (tz - Position.z[eid]) * k;
+      let dyaw = tyaw - Yaw.v[eid];
+      if (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      if (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      Yaw.v[eid] += dyaw * k;
       const obj = object3ds.get(eid);
       if (obj) {
         obj.position.set(Position.x[eid], Position.y[eid], Position.z[eid]);
@@ -589,13 +615,12 @@ export class Game {
     };
   }
 
-  /** Nearest player-created object in grab range (net grab candidate). */
-  nearestCreatedPropId(): number {
+  /** Nearest free prop in grab range — ANY catalog object can be carried (chaos rule). */
+  nearestGrabbablePropId(): number {
     const e = this.playerEid;
     let best = -1;
     let bestD = GRAB_RADIUS;
     for (const [propId, eid] of this.propEidById) {
-      if (propId < CREATED_PROP_ID_BASE) continue;
       if (hasComponent(world, CarriedBy, eid)) continue;
       const d = Math.hypot(Position.x[eid] - Position.x[e], Position.z[eid] - Position.z[e]);
       if (d < bestD) {

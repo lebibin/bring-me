@@ -100,7 +100,7 @@ export class NetClient {
   grabAction(): void {
     const g = this.game;
     if (!g) return;
-    const propId = g.nearestCreatedPropId();
+    const propId = g.nearestGrabbablePropId();
     if (propId < 0) return;
     this.sendPosNow();
     // optimistic: it's in your hands the moment you press E

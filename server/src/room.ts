@@ -13,6 +13,7 @@
 import {
   ARCHETYPES,
   CARRY_HEIGHT,
+  CREATED_PROP_ID_BASE,
   CARRY_SPEED,
   CREATE_SECS_DEFAULT,
   CREATE_SECS_MAX,
@@ -59,7 +60,6 @@ import {
   advanceRound,
   beginRounds,
   createdPropId,
-  currentCreator,
   currentTarget,
   newMatch,
   placeObject,
@@ -95,10 +95,14 @@ interface PlayerState extends RulePlayer {
   lastPosMs: number;
 }
 
-/** Runtime state of the current round's target object (volatile; rebuilt on wake). */
+/**
+ * Runtime state of any displaced prop — the round target OR a decoy someone
+ * picked up for chaos. Created lazily on first grab; volatile (on wake,
+ * displaced decoys reset to their home spots).
+ */
 interface DynProp {
   propId: number;
-  creatorId: number;
+  creatorId: number; // only enforced while this prop is the round target
   x: number;
   y: number;
   z: number;
@@ -111,6 +115,7 @@ interface DynProp {
   lockUntil: number;
   lockedFor: number;
   moved: boolean;
+  wrongHit: boolean; // decoy already bonked the NPC once (one "wrong!" per flight)
 }
 
 interface Persisted {
@@ -134,7 +139,8 @@ export class BringMeRoom {
     roundSecs: ROUND_SECS_DEFAULT,
   };
   private match: MatchState | null = null;
-  private dyn: DynProp | null = null;
+  /** propId -> runtime state for every prop that has been grabbed/moved */
+  private readonly dyn = new Map<number, DynProp>();
   private tickHandle: number | null = null;
   private worldCache: World | null = null;
 
@@ -319,14 +325,15 @@ export class BringMeRoom {
     if (!att) return;
     if (this.sockets.get(att.playerId) !== ws) return;
     const p = this.players.get(att.playerId);
-    // A leaver holding the target drops it in place.
-    if (p && this.dyn && this.dyn.heldBy === p.id) {
-      this.dyn.heldBy = 0;
-      this.dyn.x = p.x;
-      this.dyn.z = p.z;
-      this.dyn.y = PROP_REST_Y;
-      this.dyn.moved = true;
-      this.broadcast({ type: "dropped", propId: this.dyn.propId, x: q2(p.x), z: q2(p.z), lockUntil: 0, lockedFor: 0 });
+    // A leaver holding anything drops it in place.
+    const held = p && p.carry >= 0 ? this.dyn.get(p.carry) : undefined;
+    if (p && held && held.heldBy === p.id) {
+      held.heldBy = 0;
+      held.x = p.x;
+      held.z = p.z;
+      held.y = PROP_REST_Y;
+      held.moved = true;
+      this.broadcast({ type: "dropped", propId: held.propId, x: q2(p.x), z: q2(p.z), lockUntil: 0, lockedFor: 0 });
     }
     this.sockets.delete(att.playerId);
     this.players.delete(att.playerId);
@@ -362,7 +369,8 @@ export class BringMeRoom {
     };
     const now = Date.now();
     this.match = newMatch(this.seed, this.settings, [...this.players.keys()], now);
-    this.dyn = null;
+    this.dyn.clear();
+    for (const pl of this.players.values()) pl.carry = -1;
     this.picks.clear();
     this.persist();
     this.persistMatch();
@@ -474,7 +482,7 @@ export class BringMeRoom {
         if (advanceRound(m, now) === "end") {
           this.broadcast({ type: "matchEnd", scores: m.scores });
           this.match = null;
-          this.dyn = null;
+          this.dyn.clear();
           void this.state.storage.delete("match");
           this.broadcast({ type: "phase", name: "LOBBY", endsAt: 0 });
           this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings });
@@ -501,16 +509,37 @@ export class BringMeRoom {
     });
   }
 
-  private initDyn(): void {
+  /** The current round's target propId, or -1 outside a round. */
+  private targetId(): number {
+    const t = this.match ? currentTarget(this.match) : null;
+    return t ? t.propId : -1;
+  }
+
+  /** A prop's home position/creator: created objects from the match, decoys from worldgen. */
+  private propHome(propId: number): { x: number; z: number; scale: number; creatorId: number } | null {
     const m = this.match;
-    const t = m ? currentTarget(m) : null;
-    if (!m || !t) return;
-    this.dyn = {
-      propId: t.propId,
-      creatorId: currentCreator(m),
-      x: t.x,
-      y: PROP_REST_Y * t.scale,
-      z: t.z,
+    if (propId >= CREATED_PROP_ID_BASE) {
+      const creatorId = propId - CREATED_PROP_ID_BASE;
+      const obj = m?.objects[creatorId];
+      return obj ? { x: obj.x, z: obj.z, scale: obj.scale, creatorId } : null;
+    }
+    const w = this.world();
+    const prop = w.props[propId]?.propId === propId ? w.props[propId] : w.props.find((p) => p.propId === propId);
+    return prop ? { x: prop.x, z: prop.z, scale: prop.scale, creatorId: 0 } : null;
+  }
+
+  /** Get or lazily create the runtime state for a prop, seeded at its home spot. */
+  private ensureDyn(propId: number): DynProp | null {
+    const existing = this.dyn.get(propId);
+    if (existing) return existing;
+    const home = this.propHome(propId);
+    if (!home) return null;
+    const d: DynProp = {
+      propId,
+      creatorId: home.creatorId,
+      x: home.x,
+      y: PROP_REST_Y * home.scale,
+      z: home.z,
       vx: 0,
       vy: 0,
       vz: 0,
@@ -520,16 +549,40 @@ export class BringMeRoom {
       lockUntil: 0,
       lockedFor: 0,
       moved: false,
+      wrongHit: false,
     };
-    for (const p of this.players.values()) p.carry = -1;
+    this.dyn.set(propId, d);
+    return d;
+  }
+
+  /** Round start: the target must be free — force-drop it if someone was hauling it around as a decoy. */
+  private initDyn(): void {
+    const target = this.targetId();
+    if (target < 0) return;
+    const d = this.ensureDyn(target);
+    if (!d) return;
+    d.wrongHit = false;
+    if (d.heldBy !== 0) {
+      const holder = this.players.get(d.heldBy);
+      if (holder) holder.carry = -1;
+      d.heldBy = 0;
+      d.y = PROP_REST_Y;
+      d.moved = true;
+      this.broadcast({ type: "dropped", propId: d.propId, x: q2(d.x), z: q2(d.z), lockUntil: 0, lockedFor: 0 });
+    }
   }
 
   private endRound(deliverer: number, now: number): void {
     const m = this.match;
     if (!m || m.phase !== "SEEK") return;
     const result = resolveRound(m, now, deliverer);
-    for (const p of this.players.values()) p.carry = -1;
-    this.dyn = null;
+    // only the target leaves play — decoys people are hauling stay in hand
+    const target = this.dyn.get(createdPropId(result.creatorId));
+    if (target && target.heldBy !== 0) {
+      const holder = this.players.get(target.heldBy);
+      if (holder) holder.carry = -1;
+      target.heldBy = 0;
+    }
     if (result.found) {
       this.broadcast({ type: "delivered", byId: deliverer, propId: createdPropId(result.creatorId), points: result.delivererPoints });
     }
@@ -549,12 +602,13 @@ export class BringMeRoom {
   // ---------- seek actions ----------
 
   private onGrab(p: PlayerState, propId: number): void {
-    const d = this.dyn;
     if (this.phase() !== "SEEK" || !this.isParticipant(p.id)) {
       this.sayTo(p.id, { type: "err", code: "bad_phase" });
       return;
     }
-    if (!d || propId !== d.propId) {
+    // ANY catalog prop can be picked up (chaos rule); only the target scores
+    const d = this.ensureDyn(propId);
+    if (!d) {
       this.sayTo(p.id, { type: "err", code: "wrong" });
       return;
     }
@@ -571,7 +625,7 @@ export class BringMeRoom {
   }
 
   private onDrop(p: PlayerState): void {
-    const d = this.dyn;
+    const d = p.carry >= 0 ? this.dyn.get(p.carry) : undefined;
     if (!d || d.heldBy !== p.id) return;
     d.heldBy = 0;
     d.x = p.x;
@@ -583,7 +637,7 @@ export class BringMeRoom {
   }
 
   private onThrow(p: PlayerState, dirX: number, dirZ: number, power: number): void {
-    const d = this.dyn;
+    const d = p.carry >= 0 ? this.dyn.get(p.carry) : undefined;
     const now = Date.now();
     if (!d || d.heldBy !== p.id) return;
     if (now < p.stunnedUntil) {
@@ -599,6 +653,7 @@ export class BringMeRoom {
     d.heldBy = 0;
     d.airborne = true;
     d.moved = true;
+    d.wrongHit = false; // a fresh flight may bonk the NPC once more
     d.thrownBy = p.id;
     d.x = p.x + (dirX / len) * 0.6;
     d.y = CARRY_HEIGHT;
@@ -640,7 +695,7 @@ export class BringMeRoom {
     victim.stunnedUntil = now + STUN_DURATION_MS;
     p.stunCdUntil = now + STUN_COOLDOWN_MS;
     this.broadcast({ type: "stunned", victimId, byId: p.id, until: victim.stunnedUntil });
-    const d = this.dyn;
+    const d = victim.carry >= 0 ? this.dyn.get(victim.carry) : undefined;
     if (d && d.heldBy === victimId) {
       d.heldBy = 0;
       d.x = victim.x;
@@ -690,35 +745,48 @@ export class BringMeRoom {
   private tick(): void {
     if (this.sockets.size === 0) return;
     const m = this.match;
-    const d = this.dyn;
     const now = Date.now();
 
-    if (m && m.phase === "SEEK" && d) {
-      // thrown-prop flight, shared ballistics
-      if (d.airborne) {
-        const b: Ballistic = { x: d.x, y: d.y, z: d.z, vx: d.vx, vy: d.vy, vz: d.vz, resting: false };
-        stepBallistic(b, TICK_MS / 1000);
-        d.x = b.x;
-        d.y = b.y;
-        d.z = b.z;
-        d.vx = b.vx;
-        d.vy = b.vy;
-        d.vz = b.vz;
-        if (b.resting) d.airborne = false;
-      }
-      // deliveries
+    const target = this.targetId();
+    if (m && m.phase === "SEEK") {
       const w = this.world();
-      if (d.heldBy !== 0) {
-        const carrier = this.players.get(d.heldBy);
-        if (carrier && carriedDelivery(carrier, w.npc.x, w.npc.z)) {
-          this.endRound(carrier.id, now);
+      for (const d of this.dyn.values()) {
+        // thrown-prop flight, shared ballistics
+        if (d.airborne) {
+          const b: Ballistic = { x: d.x, y: d.y, z: d.z, vx: d.vx, vy: d.vy, vz: d.vz, resting: false };
+          stepBallistic(b, TICK_MS / 1000);
+          d.x = b.x;
+          d.y = b.y;
+          d.z = b.z;
+          d.vx = b.vx;
+          d.vy = b.vy;
+          d.vz = b.vz;
+          if (b.resting) d.airborne = false;
         }
-      } else if (d.airborne && airborneDelivery(d.x, d.y, d.z, w.npc.x, w.npc.z)) {
-        this.endRound(d.thrownBy, now);
+        // NPC contact
+        if (d.propId === target) {
+          if (d.heldBy !== 0) {
+            const carrier = this.players.get(d.heldBy);
+            if (carrier && carriedDelivery(carrier, w.npc.x, w.npc.z)) {
+              this.endRound(carrier.id, now);
+              break; // round is over; snapshot below reflects the new phase
+            }
+          } else if (d.airborne && airborneDelivery(d.x, d.y, d.z, w.npc.x, w.npc.z)) {
+            this.endRound(d.thrownBy, now);
+            break;
+          }
+        } else if (d.airborne && !d.wrongHit && airborneDelivery(d.x, d.y, d.z, w.npc.x, w.npc.z)) {
+          // a decoy bonked the NPC — tell the thrower it's the wrong one
+          d.wrongHit = true;
+          this.sayTo(d.thrownBy, { type: "err", code: "wrong" });
+        }
       }
-      // hide-in-plain-sight accrual
-      if (this.dyn && losActive(this.ruleTarget(this.dyn), this.players.values())) {
-        accrue(m, TICK_MS);
+      // hide-in-plain-sight accrual (target may still be untouched at home)
+      if (this.match && this.match.phase === "SEEK" && target >= 0) {
+        const td = this.ensureDyn(target);
+        if (td && losActive(this.ruleTarget(td), this.players.values())) {
+          accrue(m, TICK_MS);
+        }
       }
     }
 
@@ -734,9 +802,10 @@ export class BringMeRoom {
       });
     }
     const loose: SnapshotLoose[] = [];
-    const dd = this.dyn;
-    if (dd && dd.heldBy === 0 && dd.moved) {
-      loose.push({ propId: dd.propId, x: q2(dd.x), y: q2(dd.y), z: q2(dd.z) });
+    for (const d of this.dyn.values()) {
+      if (d.heldBy === 0 && (d.moved || d.airborne)) {
+        loose.push({ propId: d.propId, x: q2(d.x), y: q2(d.y), z: q2(d.z) });
+      }
     }
     this.broadcast({ type: "snapshot", t: now, players, loose, scores: this.match?.scores ?? {} });
   }
@@ -746,7 +815,9 @@ export class BringMeRoom {
   private ruleTarget(d: DynProp): RuleTarget {
     return {
       propId: d.propId,
-      creatorId: d.creatorId,
+      // the can't-grab-your-own rule only applies to the round's target —
+      // hauling your own creation around as a decoy is fair chaos
+      creatorId: d.propId === this.targetId() ? d.creatorId : 0,
       x: d.x,
       z: d.z,
       heldBy: d.heldBy,

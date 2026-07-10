@@ -90,6 +90,12 @@ export interface World {
   beds: GardenBed[];
   /** circle keep-outs for props (one entry per solid fixture, incl. tree trunks) */
   zones: { x: number; z: number; r: number }[];
+  /**
+   * circle colliders for PLAYER movement — things you can't walk through in
+   * real life (cars, sheds, tree trunks, pond water...). The pool and house
+   * rects also block; walkable surfaces (deck, driveway, sandpit) don't.
+   */
+  solids: { x: number; z: number; r: number }[];
 }
 
 const HALF = MAP_SIZE / 2;
@@ -348,6 +354,7 @@ export function generateWorld(seed: number): World {
     hedges: [],
     beds: [],
     zones,
+    solids: [],
   };
 
   // Hedges (cypress) along the side fences AND the plaza fence, skipping structures.
@@ -383,6 +390,24 @@ export function generateWorld(seed: number): World {
       break;
     }
   }
+
+  // Player-blocking colliders (hedges exist by now; pool/house block as rects).
+  world.solids = [
+    { x: car.x, z: car.z, r: 1.6 },
+    { x: car2.x, z: car2.z, r: 1.6 },
+    { x: shed.x, z: shed.z, r: 1.9 },
+    { x: shed2.x, z: shed2.z, r: 1.9 },
+    { x: pond.x, z: pond.z, r: pond.r }, // no wading
+    { x: doghouse.x, z: doghouse.z, r: 0.9 },
+    { x: birdbath.x, z: birdbath.z, r: 0.5 },
+    { x: bbq.x, z: bbq.z, r: 0.55 },
+    { x: picnic.x, z: picnic.z, r: 1.2 },
+    { x: trampoline.x, z: trampoline.z, r: 1.75 },
+    { x: veggie.x, z: veggie.z, r: 1.8 },
+    ...benches.map((b) => ({ x: b.x, z: b.z, r: 0.8 })),
+    ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.5 * t.s })),
+    ...world.hedges.map((h) => ({ x: h.x, z: h.z, r: 0.5 * h.s })),
+  ];
 
   // Decoy scatter: jittered grid over every legal lawn spot.
   let nextId = 0;
