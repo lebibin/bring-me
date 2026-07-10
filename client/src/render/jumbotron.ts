@@ -17,14 +17,18 @@ export class Jumbotron {
   private lastDraw: ((c: CanvasRenderingContext2D, w: number, h: number) => void) | null = null;
 
   constructor(world: World) {
+    // 2x resolution + 2x context scale: draw code keeps its 512x256 coordinate
+    // space, but the texture stays crisp under the zoomed-in countdown camera
     this.canvas = document.createElement("canvas");
-    this.canvas.width = 512;
-    this.canvas.height = 256;
+    this.canvas.width = 1024;
+    this.canvas.height = 512;
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
+    ctx.scale(2, 2);
     this.ctx2d = ctx;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
+    this.texture.anisotropy = 8; // stays sharp at oblique viewing angles
 
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a2d38, flatShading: true });
     const frame = new THREE.Mesh(new THREE.BoxGeometry(6.6, 3.6, 0.4), frameMat);
@@ -54,7 +58,10 @@ export class Jumbotron {
   private draw(fn: (c: CanvasRenderingContext2D, w: number, h: number) => void): void {
     this.lastDraw = fn;
     const c = this.ctx2d;
-    const { width: w, height: h } = this.canvas;
+    // logical drawing space stays 512x256 — the context is scaled 2x onto the
+    // 1024x512 backing canvas
+    const w = 512;
+    const h = 256;
     c.fillStyle = "#10131c";
     c.fillRect(0, 0, w, h);
     c.textAlign = "center";
