@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bring Me — 2-player harness</title>
+    <style>
+      body { margin: 0; background: #0e1016; display: flex; height: 100vh; }
+      iframe { flex: 1; border: 0; border-right: 2px solid #333; }
+    </style>
+  </head>
+  <body>
+    <script>
+      // Two clients in one room; ?name= auto-joins each side.
+      const code = new URLSearchParams(location.search).get("room")
+        ?? "H" + Math.random().toString(36).slice(2, 6).toUpperCase().replace(/[^A-Z0-9]/g, "0");
+      for (const name of ["hostA", "guestB"]) {
+        const f = document.createElement("iframe");
+        f.src = `/?name=${name}#/r/${code}`;
+        f.id = name;
+        document.body.appendChild(f);
+      }
+      // console helpers: harness.a() / harness.b() return each side's __bringme
+      window.harness = {
+        code,
+        a: () => document.getElementById("hostA").contentWindow.__bringme,
+        b: () => document.getElementById("guestB").contentWindow.__bringme,
+      };
+    </script>
+  </body>
+</html>

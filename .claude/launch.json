@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bringme-client",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "@bringme/client"],
+      "port": 5175
+    },
+    {
+      "name": "bringme-server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "@bringme/server"],
+      "port": 8787
+    }
+  ]
+}

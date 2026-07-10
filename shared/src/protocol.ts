@@ -1,0 +1,157 @@
+/**
+ * Wire protocol — JSON text frames, discriminated on `type`.
+ * C2S = client to server, S2C = server to client.
+ */
+
+import type { PropParams } from "./catalog.ts";
+
+export type PhaseName =
+  | "LOBBY"
+  | "CREATE"
+  | "COUNTDOWN"
+  | "REVEAL"
+  | "SEEK"
+  | "RESOLVE"
+  | "MATCH_END";
+
+export interface MatchSettings {
+  createSecs: number;
+  roundSecs: number;
+}
+
+export interface PlayerInfo {
+  id: number;
+  name: string;
+  isHost: boolean;
+}
+
+/** A dynamic (player-created or loose) prop on the wire. */
+export interface NetProp {
+  propId: number;
+  archetype: number;
+  hue: number;
+  scale: number;
+  x: number;
+  z: number;
+}
+
+// ---------- C2S ----------
+
+export type C2S =
+  | { type: "hello"; name: string; v: number }
+  | { type: "start"; settings: MatchSettings }
+  | { type: "pos"; x: number; z: number; yaw: number }
+  | { type: "grab"; propId: number }
+  | { type: "drop" }
+  | { type: "throw"; dirX: number; dirZ: number; power: number }
+  | { type: "stun" }
+  | { type: "pickObject"; archetype: string; params: PropParams }
+  | { type: "placeObject"; x: number; z: number }
+  | { type: "leave" };
+
+// ---------- S2C ----------
+
+export interface SnapshotPlayer {
+  id: number;
+  x: number;
+  z: number;
+  yaw: number;
+  carry: number; // propId or -1
+  stun: 0 | 1;
+}
+
+export interface SnapshotLoose {
+  propId: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export type S2C =
+  | {
+      type: "welcome";
+      playerId: number;
+      seed: number;
+      phase: PhaseName;
+      players: PlayerInfo[];
+      settings: MatchSettings;
+      scores: Record<number, number>;
+    }
+  | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings }
+  | {
+      type: "phase";
+      name: PhaseName;
+      endsAt: number; // server epoch ms; 0 = untimed
+      round?: number;
+      totalRounds?: number;
+    }
+  | { type: "reveal"; archetype: string; params: PropParams; name: string }
+  | { type: "propAdded"; prop: NetProp; creatorId: number }
+  | {
+      type: "snapshot";
+      t: number;
+      players: SnapshotPlayer[];
+      loose: SnapshotLoose[];
+      scores: Record<number, number>;
+    }
+  | { type: "grabbed"; playerId: number; propId: number }
+  | { type: "dropped"; propId: number; x: number; z: number; lockUntil: number; lockedFor: number }
+  | { type: "thrown"; propId: number; byId: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }
+  | { type: "stunned"; victimId: number; byId: number; until: number }
+  | { type: "delivered"; byId: number; propId: number; points: number }
+  | {
+      type: "roundEnd";
+      found: boolean;
+      creatorId: number;
+      creatorPoints: number;
+      deliverer?: number;
+      scores: Record<number, number>;
+    }
+  | { type: "matchEnd"; scores: Record<number, number> }
+  | { type: "playerJoined"; player: PlayerInfo }
+  | { type: "playerLeft"; playerId: number }
+  | { type: "err"; code: ErrCode };
+
+export type ErrCode =
+  | "full"
+  | "version"
+  | "taken"
+  | "own"
+  | "far"
+  | "wrong" // grabbed a decoy / non-target object
+  | "stunned"
+  | "carrying"
+  | "locked"
+  | "not_host"
+  | "bad_phase"
+  | "bad_input"
+  | "cooldown";
+
+export function encode(msg: C2S | S2C): string {
+  return JSON.stringify(msg);
+}
+
+export function decodeC2S(raw: string): C2S | null {
+  return safeParse<C2S>(raw);
+}
+
+export function decodeS2C(raw: string): S2C | null {
+  return safeParse<S2C>(raw);
+}
+
+function safeParse<T extends { type: string }>(raw: string): T | null {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (v && typeof v === "object" && typeof (v as { type?: unknown }).type === "string") {
+      return v as T;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Quantize a float to 2 decimals for snapshot payloads. */
+export function q2(v: number): number {
+  return Math.round(v * 100) / 100;
+}

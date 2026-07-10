@@ -1,0 +1,22 @@
+{
+  "name": "bringme",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Bring Me - 3D multiplayer browser party game (Three.js + bitECS + Cloudflare Durable Objects)",
+  "workspaces": [
+    "shared",
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev -w @bringme/client",
+    "dev:server": "npm run dev -w @bringme/server",
+    "check": "tsc --noEmit -p shared && tsc --noEmit -p client && tsc --noEmit -p server",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

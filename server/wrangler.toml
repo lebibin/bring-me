@@ -1,0 +1,34 @@
+name = "bringme-room"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# One Durable Object per room code keeps every player in a room on the same
+# instance — the DO is the authoritative game server (adapted from
+# salpakan/infra/signal, upgraded from 2-seat relay to N-seat authority).
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "BringMeRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BringMeRoom"]
+
+# Production: ONE Worker serves both the game server and the built client as
+# static assets (same origin -> the page's own host is the WebSocket host, no
+# CORS, no allowlist entries). Deploy with:
+#   npm run build -w @bringme/client && npx wrangler deploy --env production
+# Kept in an environment so plain `wrangler dev` never requires client/dist.
+[env.production]
+name = "bringme"
+
+[env.production.assets]
+directory = "../client/dist"
+run_worker_first = ["/room/*"]
+
+[[env.production.durable_objects.bindings]]
+name = "ROOM"
+class_name = "BringMeRoom"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["BringMeRoom"]
