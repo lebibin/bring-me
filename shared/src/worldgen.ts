@@ -10,6 +10,7 @@
 
 import {
   MAP_SIZE,
+  PLAYER_RADIUS,
   SCATTER_CELL,
   SCATTER_FILL,
   MIN_DECOYS_PER_ARCHETYPE,
@@ -118,6 +119,21 @@ function edgeRect(e: number, lateral: number, inset: number, along: number, dept
 
 export function insideRect(r: RectZone, x: number, z: number, margin = 0): boolean {
   return Math.abs(x - r.x) <= r.w / 2 + margin && Math.abs(z - r.z) <= r.d / 2 + margin;
+}
+
+/**
+ * Is this spot inside something a player can't walk through? `margin` grows
+ * every collider (worldgen uses it to keep spawn points clear of solids, not
+ * merely outside them).
+ */
+export function blockedAt(w: World, x: number, z: number, margin = 0): boolean {
+  const pr = PLAYER_RADIUS + margin;
+  if (insideRect(w.pool, x, z, pr)) return true;
+  if (insideRect(w.house, x, z, pr)) return true;
+  for (const s of w.solids) {
+    if (Math.hypot(x - s.x, z - s.z) < s.r + pr) return true;
+  }
+  return false;
 }
 
 /** Can a prop legally sit / be hidden here? (server validates placements with this too) */
@@ -368,6 +384,8 @@ export function generateWorld(seed: number): World {
       if (Math.hypot(hx - px, hz - pz) < PLAZA_KEEPOUT + 1) continue;
       if (Math.hypot(hx - sandpit.x, hz - sandpit.z) < 4) continue;
       if (Math.hypot(hx - shed.x, hz - shed.z) < 4.5) continue;
+      // hedges are solid — never let one crowd a spawn point
+      if (spawnPoints.some((sp) => Math.hypot(hx - sp.x, hz - sp.z) < 2.4)) continue;
       world.hedges.push({ x: hx, z: hz, s: randRange(rng, 0.8, 1.35) });
     }
   }
@@ -408,6 +426,27 @@ export function generateWorld(seed: number): World {
     ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.5 * t.s })),
     ...world.hedges.map((h) => ({ x: h.x, z: h.z, r: 0.5 * h.s })),
   ];
+
+  // Spawn safety: with the full collider set known, no spawn point may sit
+  // inside (or touching) anything unpassable — relocate to the nearest clear
+  // spot if generation ever crowds one.
+  for (const sp of world.spawnPoints) {
+    if (!blockedAt(world, sp.x, sp.z, 0.3)) continue;
+    let moved = false;
+    for (let r = 0.8; r <= 14 && !moved; r += 0.8) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        const nx = clampToYard(sp.x + Math.cos(a) * r);
+        const nz = clampToYard(sp.z + Math.sin(a) * r);
+        if (!blockedAt(world, nx, nz, 0.3)) {
+          sp.x = nx;
+          sp.z = nz;
+          moved = true;
+          break;
+        }
+      }
+    }
+  }
 
   // Decoy scatter: jittered grid over every legal lawn spot.
   let nextId = 0;

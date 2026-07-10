@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - name: World-gen safety sweep (no stuck spawns, all spawns reach the NPC)
+        run: node server/test/worldcheck.mjs 200
 
   deploy:
     needs: check

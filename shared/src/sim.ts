@@ -13,23 +13,13 @@ import {
   THROW_MAX_SPEED,
   THROW_UP_RATIO,
 } from "./constants.ts";
-import { insideRect, type World } from "./worldgen.ts";
+import { blockedAt, type World } from "./worldgen.ts";
 
 const HALF = MAP_SIZE / 2;
 
 export interface Vec2 {
   x: number;
   z: number;
-}
-
-/** Is this spot inside something a player can't walk through? */
-export function blockedAt(w: World, x: number, z: number): boolean {
-  if (insideRect(w.pool, x, z, PLAYER_RADIUS)) return true;
-  if (insideRect(w.house, x, z, PLAYER_RADIUS)) return true;
-  for (const s of w.solids) {
-    if (Math.hypot(x - s.x, z - s.z) < s.r + PLAYER_RADIUS) return true;
-  }
-  return false;
 }
 
 /**
@@ -46,6 +36,9 @@ export function stepMove(pos: Vec2, dir: Vec2, speed: number, dt: number, world?
   let x = clampToMap(pos.x + nx * speed * dt);
   let z = clampToMap(pos.z + nz * speed * dt);
   if (world) {
+    // safety net: if we're somehow ALREADY inside a collider (bad spawn, old
+    // save, future bug), collision must never cage us — move freely until out
+    if (blockedAt(world, pos.x, pos.z)) return { x, z };
     if (blockedAt(world, x, pos.z)) x = pos.x;
     if (blockedAt(world, x, z)) z = pos.z;
     // movement fully blocked by a round obstacle: axis separation alone

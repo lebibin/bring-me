@@ -48,6 +48,8 @@ The world is never sent over the wire — both sides run
   stun-steal + throw-deliver, LoS-timeout round; ~90 s, needs wrangler dev)
 - `node server/test/companion.mjs <CODE>` — autonomous second player for
   browser e2e sessions (joins, places, delivers rounds that aren't its own)
+- `node server/test/worldcheck.mjs [seeds]` — world-gen safety sweep: every
+  spawn clear of colliders + BFS-reachable to the NPC (runs in CI)
 
 ## Verifying
 
