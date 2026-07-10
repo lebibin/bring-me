@@ -369,10 +369,16 @@ export class Game {
       // it backward made the jumper read as facing the wrong way.
       const carrying = carriers.has(eid);
       const blend = Math.min(1, dt * 14);
-      const targetL = carrying ? -1.15 : airborne ? 0.55 : moving ? -swing * 0.6 : 0;
-      const targetR = carrying ? -1.15 : airborne ? -2.9 : moving ? swing * 0.6 : 0;
+      const targetL = carrying ? -0.85 : airborne ? 0.55 : moving ? -swing * 0.6 : 0;
+      const targetR = carrying ? -0.85 : airborne ? -2.9 : moving ? swing * 0.6 : 0;
       parts.armL.rotation.x += (targetL - parts.armL.rotation.x) * blend;
       parts.armR.rotation.x += (targetR - parts.armR.rotation.x) * blend;
+      // elbows: deep bend wrapping a carried object, straight for the raised
+      // jump fist, relaxed otherwise
+      const elbowL = carrying ? -0.7 : airborne ? -0.25 : -0.18;
+      const elbowR = carrying ? -0.7 : airborne ? -0.05 : -0.18;
+      parts.elbowL.rotation.x += (elbowL - parts.elbowL.rotation.x) * blend;
+      parts.elbowR.rotation.x += (elbowR - parts.elbowR.rotation.x) * blend;
 
       // slap: anticipation -> whip -> follow-through, with the whole body in it
       const slapStart = this.slapAnim.get(eid);
