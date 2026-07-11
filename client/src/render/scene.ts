@@ -60,8 +60,9 @@ export function createScene(container: HTMLElement): SceneCtx {
   scene.add(sun);
 
   // post chain: ambient occlusion grounds objects, a whisper of bloom makes
-  // the jumbotron and highlights glow. ?fx=0 renders plain (weak machines).
-  const fxOn = new URLSearchParams(location.search).get("fx") !== "0";
+  // the jumbotron and highlights glow. OFF by default (perf headroom for the
+  // party crowd) — opt in with ?fx=1.
+  const fxOn = new URLSearchParams(location.search).get("fx") === "1";
   let composer: EffectComposer | null = null;
   let gtao: GTAOPass | null = null;
   let bloom: UnrealBloomPass | null = null;
