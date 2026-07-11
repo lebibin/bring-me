@@ -190,7 +190,7 @@ export class Game {
     }
     this.jumbotron.update(dt);
     this.updateNetVisuals();
-    this.ctx.renderer.render(this.ctx.scene, this.ctx.camera);
+    this.ctx.render();
   }
 
   /** Server-driven HUD/jumbotron bits + ghost + stun wobble (net mode). */

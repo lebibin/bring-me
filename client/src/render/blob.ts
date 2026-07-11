@@ -90,5 +90,12 @@ export function buildBlob(hue: number): THREE.Group {
     body,
   };
   g.userData["parts"] = parts;
+  g.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      m.castShadow = true;
+      m.receiveShadow = true;
+    }
+  });
   return g;
 }

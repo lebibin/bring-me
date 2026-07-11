@@ -1,10 +1,19 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { MAP_SIZE, type RectZone, type World } from "@bringme/shared";
 
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** draw one presented frame — through the post chain unless ?fx=0 */
+  render(): void;
 }
 
 const HALF = MAP_SIZE / 2;
@@ -13,27 +22,76 @@ export function createScene(container: HTMLElement): SceneCtx {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // color-preserving tone mapping (ACES washed the stylized palette) + soft
+  // shadows: most of the perceived-quality jump
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8fc3e8);
   scene.fog = new THREE.Fog(0x8fc3e8, 34, 85);
+  // image-based fill light so materials pick up sky/bounce color, not just
+  // two analytic lights (the reason everything used to look chalky)
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.3;
+  pmrem.dispose();
 
   const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 200);
   camera.position.set(0, 6, -8);
 
-  scene.add(new THREE.HemisphereLight(0xd8ecff, 0x5c7a45, 1.05));
-  const sun = new THREE.DirectionalLight(0xfff3da, 1.7);
+  scene.add(new THREE.HemisphereLight(0xd8ecff, 0x5c7a45, 0.5));
+  const sun = new THREE.DirectionalLight(0xfff3da, 2.1);
   sun.position.set(18, 30, 12);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -44;
+  sun.shadow.camera.right = 44;
+  sun.shadow.camera.top = 44;
+  sun.shadow.camera.bottom = -44;
+  sun.shadow.camera.near = 5;
+  sun.shadow.camera.far = 90;
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.04; // world units — big values erase small-object shadows
   scene.add(sun);
+
+  // post chain: ambient occlusion grounds objects, a whisper of bloom makes
+  // the jumbotron and highlights glow. ?fx=0 renders plain (weak machines).
+  const fxOn = new URLSearchParams(location.search).get("fx") !== "0";
+  let composer: EffectComposer | null = null;
+  let gtao: GTAOPass | null = null;
+  let bloom: UnrealBloomPass | null = null;
+  if (fxOn) {
+    composer = new EffectComposer(renderer);
+    composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    composer.addPass(new RenderPass(scene, camera));
+    gtao = new GTAOPass(scene, camera, window.innerWidth, window.innerHeight);
+    gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1, scale: 1 });
+    gtao.blendIntensity = 1.0;
+    composer.addPass(gtao);
+    bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.18, 0.4, 1.0);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+  }
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer?.setSize(window.innerWidth, window.innerHeight);
+    gtao?.setSize(window.innerWidth, window.innerHeight);
+    bloom?.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { renderer, scene, camera };
+  const render = (): void => {
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
+  };
+  return { renderer, scene, camera, render };
 }
 
 // ---------- small helpers ----------
@@ -61,6 +119,43 @@ function box(
   m.rotation.y = ry;
   parent.add(m);
   return m;
+}
+
+/** box() with bevelled edges — reads as manufactured, not extruded. */
+function rbox(
+  parent: THREE.Object3D,
+  w: number,
+  h: number,
+  d: number,
+  color: number | string | THREE.Material,
+  x: number,
+  y: number,
+  z: number,
+  ry = 0,
+  r?: number,
+): THREE.Mesh {
+  const radius = Math.min(r ?? Math.min(w, h, d) * 0.18, Math.min(w, h, d) / 2 - 0.002);
+  const m = new THREE.Mesh(
+    new RoundedBoxGeometry(w, h, d, 2, radius),
+    typeof color === "object" ? (color as THREE.Material) : flat(color),
+  );
+  m.position.set(x, y, z);
+  m.rotation.y = ry;
+  parent.add(m);
+  return m;
+}
+
+/** clearcoated water surface — actually reflects the sky instead of matte blue */
+function waterMat(color: number, opacity = 0.92): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    color,
+    roughness: 0.12,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0.12,
+    transparent: true,
+    opacity,
+  });
 }
 
 function cyl(
@@ -203,6 +298,17 @@ export function buildStatics(scene: THREE.Scene, world: World): THREE.Group {
   const pad = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.1, 22), flat(t.plazaPad));
   pad.position.set(world.plaza.x, 0.05, world.plaza.z);
   root.add(pad);
+
+  // one sweep arms every opaque lit mesh for the shadow pass — water/glass
+  // (transparent) and clouds (basic material) are skipped
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const mat = m.material as THREE.Material;
+    if (mat.transparent || (mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) return;
+    m.castShadow = true;
+    m.receiveShadow = true;
+  });
   return root;
 }
 
@@ -328,7 +434,7 @@ function buildBeachClub(scene: THREE.Object3D, world: World): void {
   const g = edgeGroup(scene, world.house.x, world.house.z, world.houseEdge);
   const wood = flat(0x8fb8c8);
   const trim = flat(0xf0ece0);
-  box(g, 26, 3.6, 2.4, wood, 0, 1.8, 0);
+  rbox(g, 26, 3.6, 2.4, wood, 0, 1.8, 0, 0, 0.12);
   // white trim bands + flat roof with a driftwood fascia
   box(g, 26.2, 0.2, 2.6, trim, 0, 3.7, 0);
   box(g, 26.4, 0.35, 2.8, flat(0xc9bda6), 0, 3.95, 0);
@@ -375,13 +481,13 @@ function buildDeck(scene: THREE.Object3D, world: World, t: StageTheme): void {
     const s = new THREE.Group();
     s.position.set(x, 0.28, z);
     s.rotation.y = ry;
-    box(s, len, 0.42, 0.95, wicker, 0, 0.21, 0);
-    box(s, len, 0.55, 0.22, wicker, 0, 0.55, -0.38);
+    rbox(s, len, 0.42, 0.95, wicker, 0, 0.21, 0, 0, 0.07);
+    rbox(s, len, 0.55, 0.22, wicker, 0, 0.55, -0.38, 0, 0.06);
     const cushions = Math.max(1, Math.round(len / 0.85));
     for (let i = 0; i < cushions; i++) {
       const cx = -len / 2 + (i + 0.5) * (len / cushions);
-      box(s, len / cushions - 0.08, 0.18, 0.8, navy, cx, 0.5, 0.04);
-      box(s, len / cushions - 0.08, 0.5, 0.16, navy, cx, 0.75, -0.34);
+      rbox(s, len / cushions - 0.08, 0.18, 0.8, navy, cx, 0.5, 0.04, 0, 0.06);
+      rbox(s, len / cushions - 0.08, 0.5, 0.16, navy, cx, 0.75, -0.34, 0, 0.055);
     }
     g.add(s);
   };
@@ -389,7 +495,7 @@ function buildDeck(scene: THREE.Object3D, world: World, t: StageTheme): void {
   sofa(3.6, 0.4, -Math.PI / 2, 2.6); // facing left
   sofa(0, 2.3, Math.PI, 3.2); // long sofa facing house
   // coffee table + deco
-  box(g, 1.8, 0.42, 1.0, wicker, 0, 0.49, 0.2);
+  rbox(g, 1.8, 0.42, 1.0, wicker, 0, 0.49, 0.2, 0, 0.06);
   box(g, 0.35, 0.12, 0.35, flat(0xf5f2ea), -0.3, 0.76, 0.2);
   box(g, 0.25, 0.2, 0.25, flat(0x88b04b), 0.35, 0.8, 0.2);
   // planters at the deck's yard-side corners
@@ -411,10 +517,7 @@ function buildPool(scene: THREE.Object3D, pool: RectZone, theme: StageTheme): vo
   box(scene, t, 0.22, pool.d, coping, pool.x - pool.w / 2 - t / 2, 0.11, pool.z);
   box(scene, t, 0.22, pool.d, coping, pool.x + pool.w / 2 + t / 2, 0.11, pool.z);
   // water
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(pool.w, pool.d),
-    new THREE.MeshStandardMaterial({ color: theme.poolWater, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.92 }),
-  );
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(pool.w, pool.d), waterMat(theme.poolWater));
   water.rotation.x = -Math.PI / 2;
   water.position.set(pool.x, 0.14, pool.z);
   scene.add(water);
@@ -490,14 +593,16 @@ function buildCar(scene: THREE.Object3D, car: { x: number; z: number; rot: numbe
   g.position.set(car.x, 0, car.z);
   g.rotation.y = car.rot;
   scene.add(g);
-  const paint = new THREE.MeshStandardMaterial({
+  const paint = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color().setHSL(car.hue / 360, 0.55, 0.45),
     flatShading: true,
-    roughness: 0.4,
-    metalness: 0.3,
+    roughness: 0.32,
+    metalness: 0.35,
+    clearcoat: 1,
+    clearcoatRoughness: 0.12,
   });
-  box(g, 1.8, 0.55, 4.1, paint, 0, 0.65, 0); // body
-  box(g, 1.6, 0.5, 2.0, paint, 0, 1.15, -0.2); // cabin
+  rbox(g, 1.8, 0.55, 4.1, paint, 0, 0.65, 0, 0, 0.1); // body
+  rbox(g, 1.6, 0.5, 2.0, paint, 0, 1.15, -0.2, 0, 0.12); // cabin
   const glass = flat(0x9cc4de);
   box(g, 1.62, 0.36, 0.06, glass, 0, 1.18, 0.82); // windshield
   box(g, 1.62, 0.36, 0.06, glass, 0, 1.18, -1.2); // rear window
@@ -522,7 +627,7 @@ function buildShed(
   g.rotation.y = shed.rot;
   scene.add(g);
   const wall = flat(wallColor);
-  box(g, 3.0, 2.2, 2.4, wall, 0, 1.1, 0);
+  rbox(g, 3.0, 2.2, 2.4, wall, 0, 1.1, 0, 0, 0.08);
   const roofL = box(g, 1.75, 0.14, 2.8, flat(roofColor), -0.78, 2.55, 0);
   roofL.rotation.z = 0.5;
   const roofR = box(g, 1.75, 0.14, 2.8, flat(roofColor), 0.78, 2.55, 0);
@@ -533,10 +638,7 @@ function buildShed(
 }
 
 function buildPond(scene: THREE.Object3D, pond: { x: number; z: number; r: number }, t: StageTheme): void {
-  const water = new THREE.Mesh(
-    new THREE.CylinderGeometry(pond.r, pond.r, 0.08, 20),
-    new THREE.MeshStandardMaterial({ color: t.pondWater, roughness: 0.25, transparent: true, opacity: 0.92 }),
-  );
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(pond.r, pond.r, 0.08, 20), waterMat(t.pondWater));
   water.position.set(pond.x, 0.05, pond.z);
   scene.add(water);
   // rock ring
@@ -593,7 +695,7 @@ function buildDoghouse(scene: THREE.Object3D, at: { x: number; z: number; rot: n
   g.position.set(at.x, 0, at.z);
   g.rotation.y = at.rot;
   scene.add(g);
-  box(g, 1.2, 0.9, 1.4, flat(0xa0522d), 0, 0.45, 0);
+  rbox(g, 1.2, 0.9, 1.4, flat(0xa0522d), 0, 0.45, 0, 0, 0.06);
   const roofL = box(g, 0.75, 0.1, 1.6, flat(0x5a4a3a), -0.32, 1.1, 0);
   roofL.rotation.z = 0.55;
   const roofR = box(g, 0.75, 0.1, 1.6, flat(0x5a4a3a), 0.32, 1.1, 0);
@@ -610,10 +712,7 @@ function buildBirdbath(scene: THREE.Object3D, at: { x: number; z: number }): voi
   ped.position.set(at.x, 0.38, at.z);
   const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.28, 0.16, 12), flat(0xb5af9f));
   bowl.position.set(at.x, 0.82, at.z);
-  const water = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.34, 0.34, 0.05, 12),
-    new THREE.MeshStandardMaterial({ color: 0x6cc4e8, roughness: 0.2 }),
-  );
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.05, 12), waterMat(0x6cc4e8, 1));
   water.position.set(at.x, 0.88, at.z);
   scene.add(ped, bowl, water);
 }
@@ -648,7 +747,7 @@ function buildVeggieGarden(scene: THREE.Object3D, at: { x: number; z: number; ro
   g.rotation.y = at.rot;
   scene.add(g);
   for (const dz of [-0.8, 0.8]) {
-    box(g, 3, 0.35, 1.1, flat(0x7a5b3a), 0, 0.18, dz);
+    rbox(g, 3, 0.35, 1.1, flat(0x7a5b3a), 0, 0.18, dz, 0, 0.05);
     box(g, 2.8, 0.08, 0.9, flat(0x4a3826), 0, 0.36, dz); // soil
     for (let i = 0; i < 5; i++) {
       const sprout = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 6), flat(0x4a8a3f));
@@ -762,9 +861,9 @@ function buildPicnicTable(scene: THREE.Object3D, p: { x: number; z: number; rot:
   g.rotation.y = p.rot;
   scene.add(g);
   const wood = flat(0x9a7047);
-  box(g, 1.7, 0.09, 0.9, wood, 0, 0.75, 0); // top
+  rbox(g, 1.7, 0.09, 0.9, wood, 0, 0.75, 0, 0, 0.03); // top
   for (const side of [-1, 1]) {
-    box(g, 1.7, 0.07, 0.3, wood, 0, 0.45, side * 0.75); // benches
+    rbox(g, 1.7, 0.07, 0.3, wood, 0, 0.45, side * 0.75, 0, 0.025); // benches
     const legs = box(g, 0.08, 0.8, 1.7, wood, side * 0.6, 0.38, 0);
     legs.rotation.x = side * 0.35;
   }
@@ -775,8 +874,8 @@ function buildMower(scene: THREE.Object3D, m: { x: number; z: number; rot: numbe
   g.position.set(m.x, 0, m.z);
   g.rotation.y = m.rot;
   scene.add(g);
-  box(g, 0.5, 0.18, 0.7, flat(0xd94f3d), 0, 0.28, 0); // deck
-  box(g, 0.28, 0.16, 0.3, flat(0x23262e), 0, 0.45, 0.05); // engine
+  rbox(g, 0.5, 0.18, 0.7, flat(0xd94f3d), 0, 0.28, 0, 0, 0.045); // deck
+  rbox(g, 0.28, 0.16, 0.3, flat(0x23262e), 0, 0.45, 0.05, 0, 0.04); // engine
   for (const [wx, wz, r] of [[-0.24, 0.28, 0.09], [0.24, 0.28, 0.09], [-0.24, -0.3, 0.12], [0.24, -0.3, 0.12]] as const) {
     const wheel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.08, 10), flat(0x1c1e24));
     wheel.rotation.z = Math.PI / 2;

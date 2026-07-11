@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { buildPropMesh } from "./propMeshes.ts";
 
 const SIZE = 200;
@@ -18,7 +19,12 @@ function ensure(): void {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setSize(SIZE, SIZE);
   renderer.setClearColor(0x000000, 0); // transparent background
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; // match the world's grade
+  renderer.toneMappingExposure = 1.15;
   scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
   camera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x778, 1.5));
   const sun = new THREE.DirectionalLight(0xfff2d9, 1.9);
