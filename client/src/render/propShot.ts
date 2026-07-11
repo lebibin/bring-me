@@ -19,15 +19,19 @@ function ensure(): void {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setSize(SIZE, SIZE);
   renderer.setClearColor(0x000000, 0); // transparent background
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; // match the world's grade
-  renderer.toneMappingExposure = 1.15;
+  // EXACTLY the world's grade (scene.ts) — a different tone map or hotter
+  // lights here makes the jumbotron photo a different color than the object
+  // players are hunting for
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.0;
   scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.3;
   pmrem.dispose();
   camera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x778, 1.5));
-  const sun = new THREE.DirectionalLight(0xfff2d9, 1.9);
+  scene.add(new THREE.HemisphereLight(0xd8ecff, 0x777788, 0.55));
+  const sun = new THREE.DirectionalLight(0xfff3da, 2.1);
   sun.position.set(2, 3, 2.5);
   scene.add(sun);
 }
