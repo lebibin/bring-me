@@ -367,6 +367,29 @@ export function generateWorld(seed: number, stage = 0): World {
     z: bbq.z + hInfo.nz * 3.4 + hInfo.tz * randRange(rng, -1, 1),
     rot: randRange(rng, 0, Math.PI * 2),
   };
+  // Local offset -> world for a fixture rendered with three.js rotation.y=rot
+  // (shared by the prop keep-outs below and the player colliders further down).
+  const rotXZ = (cx: number, cz: number, rot: number, lx: number, lz: number): { x: number; z: number } => ({
+    x: cx + lx * Math.cos(rot) + lz * Math.sin(rot),
+    z: cz - lx * Math.sin(rot) + lz * Math.cos(rot),
+  });
+  const deckRot = [0, -Math.PI / 2, Math.PI, Math.PI / 2][houseEdge];
+  // pool loungers flank the pool on every stage except the park (duck pond)
+  const loungerSpots: { x: number; z: number }[] =
+    stage === 1
+      ? []
+      : [-1, 1].flatMap((side) => [-1.6, 0.6].map((dz) => ({ x: pool.x + side * (pool.w / 2 + 1.4), z: pool.z + dz })));
+  // the picnic table (collider r1.2) must clear the deck's planter tubs (r0.5)
+  // — push it radially away just far enough, never a big blind jump
+  for (const lx of [-6.6, 6.6]) {
+    const p = rotXZ(deck.x, deck.z, deckRot, lx, 2.9);
+    const d = Math.hypot(picnic.x - p.x, picnic.z - p.z);
+    if (d < 1.8) {
+      const k = (1.8 - d) / Math.max(d, 0.001);
+      picnic.x += (picnic.x - p.x) * k;
+      picnic.z += (picnic.z - p.z) * k;
+    }
+  }
   blockers.push({ x: bbq.x, z: bbq.z, r: 2 }, { x: picnic.x, z: picnic.z, r: 3 });
 
   // one prop keep-out circle per solid fixture
@@ -374,7 +397,7 @@ export function generateWorld(seed: number, stage = 0): World {
   // scattered decoys can never spawn intersecting a fixture (the swing set
   // reaches 5.1m from the playground center, a rotated car's corner 2.24m...)
   const zones: { x: number; z: number; r: number }[] = [
-    { x: playground.x, z: playground.z, r: 5.5 },
+    { x: playground.x, z: playground.z, r: 5.8 }, // swing A-frame solids reach 5.65m
     { x: hoop.x, z: hoop.z, r: 2 },
     { x: car.x, z: car.z, r: 2.8 },
     { x: car2.x, z: car2.z, r: 2.8 },
@@ -385,7 +408,7 @@ export function generateWorld(seed: number, stage = 0): World {
     { x: bbq.x, z: bbq.z, r: 1.1 },
     { x: picnic.x, z: picnic.z, r: 1.8 },
     { x: mower.x, z: mower.z, r: 0.9 },
-    { x: playground2.x, z: playground2.z, r: 5.5 },
+    { x: playground2.x, z: playground2.z, r: 5.8 },
     { x: pond.x, z: pond.z, r: pond.r + 0.5 },
     { x: soccer.x, z: soccer.z, r: 2.2 },
     { x: doghouse.x, z: doghouse.z, r: 1.5 },
@@ -394,6 +417,9 @@ export function generateWorld(seed: number, stage = 0): World {
     { x: veggie.x, z: veggie.z, r: 2.4 },
     ...benches.map((b) => ({ x: b.x, z: b.z, r: 1.4 })),
     ...trees.map((t) => ({ x: t.x, z: t.z, r: 0.7 * t.s })),
+    // loungers + deck planters get keep-outs so beds/props never spawn inside them
+    ...loungerSpots.map((p) => ({ ...p, r: 1.4 })),
+    ...[-6.6, 6.6].map((lx) => ({ ...rotXZ(deck.x, deck.z, deckRot, lx, 2.9), r: 1.0 })),
   ];
 
   const world: World = {
@@ -441,7 +467,8 @@ export function generateWorld(seed: number, stage = 0): World {
     for (let a = -HALF + 4; a <= HALF - 4; a += randRange(rng, 3.0, 4.4)) {
       const hx = info.wx + info.nx * 1.6 + info.tx * a;
       const hz = info.wz + info.nz * 1.6 + info.tz * a;
-      if (Math.hypot(hx - playground.x, hz - playground.z) < 6) continue;
+      if (Math.hypot(hx - playground.x, hz - playground.z) < 6.5) continue;
+      if (Math.hypot(hx - playground2.x, hz - playground2.z) < 6.5) continue;
       if (Math.hypot(hx - hoop.x, hz - hoop.z) < 4) continue;
       if (Math.hypot(hx - px, hz - pz) < PLAZA_KEEPOUT + 1) continue;
       if (Math.hypot(hx - sandpit.x, hz - sandpit.z) < 4) continue;
@@ -454,11 +481,12 @@ export function generateWorld(seed: number, stage = 0): World {
   // A few bushes flanking the house — kept at ±12.5 lateral so they clear
   // both the doghouse (lateral +14) and the driveway lane (around -9.5).
   for (const off of [-1, 1]) {
-    world.hedges.push({
-      x: house.x + (houseEdge % 2 === 0 ? off * 12.5 : hInfo.nx * 2.2),
-      z: house.z + (houseEdge % 2 === 0 ? hInfo.nz * 2.2 : off * 12.5),
-      s: randRange(rng, 0.7, 1.0),
-    });
+    const bx = house.x + (houseEdge % 2 === 0 ? off * 12.5 : hInfo.nx * 2.2);
+    const bz = house.z + (houseEdge % 2 === 0 ? hInfo.nz * 2.2 : off * 12.5);
+    // skip a flank bush that generation crowded against a playground's gear
+    if (Math.hypot(bx - playground.x, bz - playground.z) < 6.5) continue;
+    if (Math.hypot(bx - playground2.x, bz - playground2.z) < 6.5) continue;
+    world.hedges.push({ x: bx, z: bz, s: randRange(rng, 0.7, 1.0) });
   }
 
   // Garden beds with flowers. Their center bush becomes a solid, so the bed
@@ -482,7 +510,38 @@ export function generateWorld(seed: number, stage = 0): World {
 
   // Player-blocking colliders (hedges exist by now; pool/house block as
   // rects). h > 0 = flat standable top you can jump onto / place objects on.
+  // Playground pieces (local coords match scene.ts buildPlayground): swing
+  // A-frame ends, slide tower + chute, seesaw. The space under the swing bar
+  // stays walkable — you'd duck through the swings in real life too.
+  const playgroundSolids = (pg: { x: number; z: number; rot: number }): { x: number; z: number; r: number; h: number }[] => [
+    { ...rotXZ(pg.x, pg.z, pg.rot, -5.1, 0), r: 0.55, h: 0 },
+    { ...rotXZ(pg.x, pg.z, pg.rot, -1.7, 0), r: 0.55, h: 0 },
+    { ...rotXZ(pg.x, pg.z, pg.rot, 2.6, -0.75), r: 0.85, h: 0 },
+    { ...rotXZ(pg.x, pg.z, pg.rot, 2.6, 0.9), r: 0.55, h: 0 },
+    { ...rotXZ(pg.x, pg.z, pg.rot, 0.2, 2.6), r: 1.1, h: 0 },
+  ];
+  // Deck furniture (local coords match scene.ts buildDeck; the deck group uses
+  // the same per-edge rotation as edgeRect): sofas + coffee table + planters.
+  const deckSolids: { x: number; z: number; r: number; h: number }[] = [
+    // side sofas at local (±3.6, 0.4), long axis along local z after their ±90° turn
+    ...[-3.6, 3.6].flatMap((sx) =>
+      [-0.7, 0.7].map((sz) => ({ ...rotXZ(deck.x, deck.z, deckRot, sx, 0.4 + sz), r: 0.6, h: 1.1 }))
+    ),
+    ...[-0.9, 0.9].map((sx) => ({ ...rotXZ(deck.x, deck.z, deckRot, sx, 2.3), r: 0.65, h: 1.1 })), // long sofa
+    { ...rotXZ(deck.x, deck.z, deckRot, 0, 0.2), r: 0.85, h: 0.98 }, // coffee table
+    ...[-6.6, 6.6].map((lx) => ({ ...rotXZ(deck.x, deck.z, deckRot, lx, 2.9), r: 0.5, h: 0 })), // planters
+  ];
   world.solids = [
+    ...playgroundSolids(playground),
+    ...playgroundSolids(playground2),
+    ...deckSolids,
+    ...loungerSpots.map((p) => ({ ...p, r: 0.7, h: 0.5 })),
+    // thin poles: soccer posts, hoop pole, clothesline poles, jumbotron posts
+    ...[-1.5, 1.5].map((px) => ({ ...rotXZ(soccer.x, soccer.z, soccer.rot, px, 0), r: 0.15, h: 0 })),
+    { ...rotXZ(hoop.x, hoop.z, hoop.rot, 0, -0.3), r: 0.2, h: 0 },
+    ...[-1.8, 1.8].map((px) => ({ ...rotXZ(clothesline.x, clothesline.z, clothesline.rot, px, 0), r: 0.15, h: 0 })),
+    ...[-2.6, 2.6].map((lx) => ({ ...rotXZ(px, pz, facing, lx, 0), r: 0.3, h: 0 })),
+    { x: mower.x, z: mower.z, r: 0.5, h: 0 },
     // car collider must cover the rotated body's corners (half-diag ~2.05)
     { x: car.x, z: car.z, r: 2.0, h: 0.95 },
     { x: car2.x, z: car2.z, r: 2.0, h: 0.95 },

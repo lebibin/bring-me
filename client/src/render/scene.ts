@@ -554,13 +554,13 @@ function buildPool(scene: THREE.Object3D, pool: RectZone, theme: StageTheme): vo
     }
     return;
   }
-  // shallow-end shimmer patch
+  // shallow-end shimmer patch — barely-there tint, not a floating glass pane
   const glint = new THREE.Mesh(
     new THREE.PlaneGeometry(pool.w * 0.6, pool.d * 0.35),
-    new THREE.MeshStandardMaterial({ color: 0x6cc4e8, roughness: 0.2, transparent: true, opacity: 0.75 }),
+    new THREE.MeshStandardMaterial({ color: 0x9adcf2, roughness: 0.15, transparent: true, opacity: 0.28 }),
   );
   glint.rotation.x = -Math.PI / 2;
-  glint.position.set(pool.x, 0.145, pool.z + pool.d * 0.2);
+  glint.position.set(pool.x, 0.143, pool.z + pool.d * 0.2);
   scene.add(glint);
   // ladder
   const lx = pool.x + pool.w / 2 + 0.15;
@@ -572,7 +572,8 @@ function buildPool(scene: THREE.Object3D, pool: RectZone, theme: StageTheme): vo
       const lounger = new THREE.Group();
       lounger.position.set(pool.x + side * (pool.w / 2 + 1.4), 0, pool.z + dz);
       box(lounger, 0.7, 0.18, 1.7, flat(0x3a72b0), 0, 0.35, 0);
-      const back = box(lounger, 0.7, 0.18, 0.7, flat(0x3a72b0), 0, 0.55, -1.0);
+      // backrest hinged at the seat's head end — lower edge tucks into the seat
+      const back = box(lounger, 0.7, 0.18, 0.7, flat(0x3a72b0), 0, 0.5, -0.65);
       back.rotation.x = -0.7;
       for (const [ly, lz] of [[0.18, 0.6], [0.18, -0.6]] as const) {
         box(lounger, 0.6, 0.35, 0.08, flat(0xf5f2ea), 0, ly, lz);
@@ -681,8 +682,9 @@ function buildSoccerGoal(scene: THREE.Object3D, at: { x: number; z: number; rot:
   crossbar.rotation.z = Math.PI / 2;
   g.add(crossbar);
   for (const px of [-1.5, 1.5]) {
-    const back = cyl(g, 0.03, 0.03, 1.7, "#c9ccd4", px, 0.6, -0.75, 6);
-    back.rotation.x = 0.9;
+    // back stay runs post-top (y1.5, z0) -> ground bar (y0, z-1.5): len √(1.5²+1.5²)
+    const back = cyl(g, 0.03, 0.03, 2.12, "#c9ccd4", px, 0.75, -0.75, 6);
+    back.rotation.x = Math.PI / 4;
   }
   box(g, 3.1, 0.02, 0.05, white, 0, 0.02, -1.5); // ground bar
   // chalk goal box on the lawn
@@ -701,7 +703,18 @@ function buildDoghouse(scene: THREE.Object3D, at: { x: number; z: number; rot: n
   roofL.rotation.z = 0.55;
   const roofR = box(g, 0.75, 0.1, 1.6, flat(0x5a4a3a), 0.32, 1.1, 0);
   roofR.rotation.z = -0.55;
-  const arch = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.08, 12, 1, false, 0, Math.PI), flat(0x1c1e24));
+  // gable fill: triangular prism (3-seg cylinder, vertex up) squashed to the
+  // roof pitch so the front/back triangles under the ridge aren't open holes
+  const gable = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 1.36, 3, 1, false, Math.PI), flat(0xa0522d));
+  gable.rotation.x = Math.PI / 2;
+  gable.scale.z = 0.35; // local z becomes world height after the tilt
+  gable.position.set(0, 1.03, 0);
+  g.add(gable);
+  // thetaStart π/2 puts the half-disc's flat chord at the bottom (an arch, not a sideways D)
+  const arch = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.26, 0.08, 12, 1, false, Math.PI / 2, Math.PI),
+    flat(0x1c1e24),
+  );
   arch.rotation.x = Math.PI / 2;
   arch.position.set(0, 0.42, 0.71);
   g.add(arch);
@@ -764,8 +777,7 @@ function buildBench(scene: THREE.Object3D, at: { x: number; z: number; rot: numb
   g.rotation.y = at.rot;
   scene.add(g);
   const wood = flat(0x9a7047);
-  for (const dy of [0, 0.09]) box(g, 1.5, 0.06, 0.2, wood, 0, 0.45 + dy * 0, -0.1 + dy * 2.2); // seat slats
-  box(g, 1.5, 0.06, 0.2, wood, 0, 0.45, 0.1);
+  for (const dz of [-0.1, 0.1]) box(g, 1.5, 0.06, 0.2, wood, 0, 0.45, dz); // seat slats
   for (const dy of [0.72, 0.88]) box(g, 1.5, 0.09, 0.05, wood, 0, dy, -0.26); // back slats
   for (const px of [-0.6, 0.6]) {
     box(g, 0.08, 0.45, 0.4, flat(0x3b3e45), px, 0.22, 0);
@@ -853,7 +865,8 @@ function buildBbq(scene: THREE.Object3D, bbq: { x: number; z: number; rot: numbe
     leg.rotation.z = Math.cos(a) * 0.2;
     leg.rotation.x = -Math.sin(a) * 0.2;
   }
-  box(g, 0.55, 0.05, 0.35, flat(0x8d6b48), 0.55, 0.8, 0); // side shelf
+  // side shelf: inner edge sinks ~3cm into the kettle (r=0.38) so it reads attached from every angle
+  box(g, 0.55, 0.05, 0.35, flat(0x8d6b48), 0.62, 0.85, 0);
 }
 
 function buildPicnicTable(scene: THREE.Object3D, p: { x: number; z: number; rot: number }): void {
@@ -865,8 +878,14 @@ function buildPicnicTable(scene: THREE.Object3D, p: { x: number; z: number; rot:
   rbox(g, 1.7, 0.09, 0.9, wood, 0, 0.75, 0, 0, 0.03); // top
   for (const side of [-1, 1]) {
     rbox(g, 1.7, 0.07, 0.3, wood, 0, 0.45, side * 0.75, 0, 0.025); // benches
-    const legs = box(g, 0.08, 0.8, 1.7, wood, side * 0.6, 0.38, 0);
-    legs.rotation.x = side * 0.35;
+  }
+  // classic A-frame ends: two crossed legs + a bench-height brace per end
+  for (const end of [-1, 1]) {
+    box(g, 0.08, 0.07, 1.72, wood, end * 0.7, 0.41, 0); // brace under both benches
+    for (const lean of [-1, 1]) {
+      const leg = box(g, 0.08, 1.0, 0.12, wood, end * 0.7, 0.4, 0);
+      leg.rotation.x = lean * 0.65; // feet at z ±0.30, tops meet under the tabletop
+    }
   }
 }
 
@@ -909,14 +928,23 @@ function buildTree(
     trunk.rotation.z = lean;
     const crownX = -Math.sin(lean) * trunkLen * 0.5; // trunk tip after the tilt
     const crownY = trunkLen * 0.5 + Math.cos(lean) * trunkLen * 0.5;
+    // fronds radiate from the crown point, drooping just past horizontal —
+    // inner ends overlap the crown so nothing floats detached
+    const hub = new THREE.Mesh(new THREE.SphereGeometry(0.17 * s, 8, 6), flat(0x3f8a44));
+    hub.position.set(crownX, crownY, 0);
+    g.add(hub);
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * Math.PI * 2;
+      const droop = 1.85 + Math.sin(x * 5.3 + i * 2.1) * 0.15; // rad from vertical
       const frond = new THREE.Mesh(new THREE.ConeGeometry(0.34 * s, 1.9 * s, 4), flat(i % 2 ? 0x3f8a44 : 0x4a9a4e));
-      frond.position.set(crownX + Math.cos(a) * 0.85 * s, crownY, Math.sin(a) * 0.85 * s);
-      frond.rotation.z = Math.cos(a) * 1.35 + Math.PI / 2;
-      frond.rotation.y = -a;
       frond.scale.y = 0.55;
       frond.scale.z = 0.28;
+      frond.rotation.z = -droop; // apex tips outward+down (Rz first in XYZ order)
+      frond.rotation.y = -a;
+      const len = 1.9 * s * 0.55;
+      const dh = Math.sin(droop) * len * 0.38;
+      const dy = Math.cos(droop) * len * 0.38;
+      frond.position.set(crownX + Math.cos(a) * dh, crownY + dy, Math.sin(a) * dh);
       g.add(frond);
     }
     for (const [dx, dz] of [[0.18, 0.05], [-0.1, 0.16]] as const) {
@@ -973,7 +1001,9 @@ function buildPlayground(
   for (const sx of [-1.7, 1.7]) {
     for (const tilt of [-0.35, 0.35]) {
       const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.6, 8), frameMat);
-      leg.position.set(sx, 1.2, tilt * 2.4);
+      // rotation.x=tilt swings the top end toward +z by sin(tilt)*halfLen, so the
+      // center sits at -sin(tilt)*halfLen: tops meet at the apex (sx, ~2.44, 0)
+      leg.position.set(sx, Math.cos(tilt) * 1.3, -Math.sin(tilt) * 1.3);
       leg.rotation.x = tilt;
       swing.add(leg);
     }
@@ -994,11 +1024,12 @@ function buildPlayground(
   for (const lx of [-0.35, 0.35]) cyl(slide, 0.05, 0.05, 1.7, "#c9ccd4", lx, 0.85, -0.8, 8);
   for (let i = 0; i < 4; i++) box(slide, 0.62, 0.05, 0.08, steel, 0, 0.35 + i * 0.4, -0.8);
   box(slide, 0.9, 0.12, 0.9, frameMat, 0, 1.7, -0.3);
+  // +x tilt drops the far (+z) end: high end meets the platform, low end kisses the lawn
   const chute = box(slide, 0.7, 0.09, 2.6, barMat, 0, 1.05, 1.05);
-  chute.rotation.x = -0.55;
+  chute.rotation.x = 0.55;
   for (const cx of [-0.38, 0.38]) {
     const rail = box(slide, 0.06, 0.16, 2.6, barMat, cx, 1.15, 1.05);
-    rail.rotation.x = -0.55;
+    rail.rotation.x = 0.55;
   }
   g.add(slide);
 
@@ -1010,9 +1041,12 @@ function buildPlayground(
   seesaw.add(pivot);
   const plank = box(seesaw, 3.2, 0.09, 0.36, seatMat, 0, 0.5, 0);
   plank.rotation.z = 0.22;
-  for (const px of [-1.4, 1.4]) {
-    const grip = cyl(seesaw, 0.025, 0.025, 0.3, "#c9ccd4", px, 0.5 + Math.tan(0.22) * px + 0.18, 0, 6);
-    grip.position.y = 0.5 + 0.22 * px + 0.2;
+  // seats + T-handles live in plank-local space so they ride the tilt
+  for (const side of [-1, 1] as const) {
+    box(plank, 0.4, 0.05, 0.38, frameMat, side * 1.35, 0.07, 0); // seat pad
+    cyl(plank, 0.025, 0.025, 0.22, "#c9ccd4", side * 1.0, 0.15, 0, 6); // handle stem
+    const gripBar = cyl(plank, 0.025, 0.025, 0.34, "#c9ccd4", side * 1.0, 0.28, 0, 6);
+    gripBar.rotation.x = Math.PI / 2; // crossbar you hold onto
   }
   g.add(seesaw);
 }

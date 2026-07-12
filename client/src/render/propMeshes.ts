@@ -6,7 +6,7 @@
 
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { ARCHETYPES } from "@bringme/shared";
+import { ARCHETYPES, PROP_REST_Y } from "@bringme/shared";
 
 function mat(hue: number, sat = 0.65, light = 0.55): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -99,9 +99,9 @@ const builders: Record<string, (hue: number) => THREE.Group> = {
     const nose = mesh(new THREE.CylinderGeometry(0.08, 0.05, 0.05, 8), mat(hue));
     nose.position.set(0.42, 0.22, 0);
     nose.rotation.z = -0.9;
+    // top-mounted arc: both ends land on the body's top face (r=0.2, y=0.18)
     const handle = mesh(new THREE.TorusGeometry(0.13, 0.025, 6, 12, Math.PI), mat(hue));
-    handle.position.set(-0.16, 0.14, 0);
-    handle.rotation.z = -0.4;
+    handle.position.set(-0.02, 0.18, 0);
     g.add(body, spout, nose, handle);
     return g;
   },
@@ -146,12 +146,19 @@ export function buildPropMesh(archetype: number, hue: number, scale: number): TH
   const builder = arch ? builders[arch.id] : undefined;
   const g = builder ? builder(hue) : new THREE.Group();
   g.scale.setScalar(scale);
-  g.traverse((o) => {
+  // The sim rests a loose prop's ORIGIN at ground + PROP_REST_Y (sim.ts), but
+  // the builders center their art near the origin — without this shift every
+  // prop hovers above the lawn by (PROP_REST_Y - its visual half-height).
+  const outer = new THREE.Group();
+  outer.add(g);
+  const bounds = new THREE.Box3().setFromObject(g);
+  if (Number.isFinite(bounds.min.y)) g.position.y = -PROP_REST_Y - bounds.min.y;
+  outer.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {
       m.castShadow = true;
       m.receiveShadow = true;
     }
   });
-  return g;
+  return outer;
 }
