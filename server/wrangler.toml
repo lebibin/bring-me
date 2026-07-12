@@ -53,10 +53,12 @@ simple = { limit = 120, period = 60 }
 [env.production]
 name = "bringme"
 # Custom domain (bibin.dev zone lives on this account): Cloudflare creates the
-# DNS record + cert on deploy. The workers.dev URL keeps working alongside.
-# Invite links in the itch build follow the PROD_HOST repo variable — keep it
-# in sync with this domain.
+# DNS record + cert on deploy. workers_dev keeps the old URL alive for links
+# shared before the domain existed — configuring routes silently disables it
+# otherwise. Invite links in the itch build follow the PROD_HOST repo
+# variable — keep it in sync with this domain.
 routes = [{ pattern = "bringme.bibin.dev", custom_domain = true }]
+workers_dev = true
 
 # The exact itch iframe origin must be confirmed on first upload (devtools →
 # the WS request's Origin header) — adjusting this var is a redeploy, not a

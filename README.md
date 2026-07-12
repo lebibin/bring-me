@@ -7,7 +7,7 @@ MECCHA CHAMELEON twist. Everyone secretly hides an object in a shared world; eac
 jumbotron flashes one of them and the whole lobby scrambles to find the real one among a hundred
 lookalikes and bring it home first.
 
-**▶ Play it now at [bringme.kevdashdev-cloudflare.workers.dev](https://bringme.kevdashdev-cloudflare.workers.dev/)** —
+**▶ Play it now at [bringme.bibin.dev](https://bringme.bibin.dev/)** —
 create a room for up to **10 players** and share the invite link, or make it **public** and let
 anyone browse in from the lobby (player count, room status and a live latency estimate included).
 Friends join straight from their browser, no install.
@@ -202,7 +202,7 @@ considered, and one-time setup: [DEPLOY.md](DEPLOY.md).
 - [x] Launch guardrails: origin allowlist, per-IP and per-socket rate limits
 - [x] itch.io channel via butler in CI
 - [x] Round SFX: countdown tick, start fanfare, win jingle (+ the 18 slaps)
-- [ ] Custom domain (bringme.bibin.dev)
+- [x] Custom domain — [bringme.bibin.dev](https://bringme.bibin.dev/)
 - [ ] Freeform object builder for hiders (compose from primitives)
 - [ ] Occlusion-aware hidden-in-plain-sight scoring
 - [ ] Mobile touch controls
