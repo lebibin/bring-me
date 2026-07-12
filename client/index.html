@@ -189,6 +189,9 @@
         background: #171a24; border: 3px solid var(--accent); border-radius: 28px;
         padding: 52px 64px; width: min(700px, 94vw);
         display: flex; flex-direction: column; gap: 24px; text-align: center;
+        /* short viewports (720p, the itch iframe): scroll inside the panel
+           instead of clipping both ends with no scrollbar (same as #credits) */
+        max-height: 86vh; overflow-y: auto;
       }
       #lobby h1 { font-size: 52px; letter-spacing: 0.08em; color: var(--accent); }
       #lobby .wordmark { width: min(440px, 78%); align-self: center; }
