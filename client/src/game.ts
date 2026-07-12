@@ -32,6 +32,7 @@ import { createScene, buildStatics, disposeStatics, type SceneCtx } from "./rend
 import { buildPropMesh } from "./render/propMeshes.ts";
 import { snapshotProp } from "./render/propShot.ts";
 import { buildBlob, recolorBlob, type BlobParts } from "./render/blob.ts";
+import { playSound } from "./audio.ts";
 import { Jumbotron } from "./render/jumbotron.ts";
 import { world, object3ds, spawnPlayer, spawnProp, spawnNpc } from "./ecs/world.ts";
 import { addComponent, removeComponent, removeEntity } from "bitecs";
@@ -98,6 +99,7 @@ export class Game {
     this.staticsGroup = buildStatics(this.ctx.scene, this.data);
 
     this.jumbotron = new Jumbotron(this.data);
+    this.jumbotron.onCountdownTick = () => playSound("countdown");
     this.ctx.scene.add(this.jumbotron.group);
 
     this.spawnScatterProps();
@@ -621,6 +623,7 @@ export class Game {
     const shot = snapshotProp(archetypeIdx, hue, scale);
     this.jumbotron.setReveal(shot, buildPropMesh(archetypeIdx, hue, scale));
     announceTarget(shot);
+    playSound("start");
   }
 
   /** Pull the view to the jumbotron for `totalSec`; zoom out at `wideAtSec`. */
@@ -843,6 +846,7 @@ export class Game {
     this.phase = "WIN";
     this.phaseEndsAt = this.simTime + RESOLVE_MS / 1000;
     this.jumbotron.setWin("DELIVERED!");
+    playSound("win");
     toast("DELIVERED! You win 🎉");
   }
 }

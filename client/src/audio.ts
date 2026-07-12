@@ -23,6 +23,28 @@ export function initSlapSounds(): void {
   }
 }
 
+// Round SFX (public/sfx/*.wav — synthesized, no external assets).
+const SFX = {
+  countdown: "/sfx/countdown.wav",
+  start: "/sfx/start.wav",
+  win: "/sfx/win.wav",
+} as const;
+const sfxPool = new Map<keyof typeof SFX, HTMLAudioElement>();
+
+export function playSound(name: keyof typeof SFX): void {
+  let a = sfxPool.get(name);
+  if (!a) {
+    a = new Audio(SFX[name]);
+    a.preload = "auto";
+    a.volume = 0.6;
+    sfxPool.set(name, a);
+  }
+  a.currentTime = 0;
+  void a.play().catch(() => {
+    /* autoplay policy before first user gesture — fine to stay silent */
+  });
+}
+
 /** Play the slap for a stun event, keyed by the shared server timestamp. */
 export function playSlapSound(eventKey: number): void {
   initSlapSounds();

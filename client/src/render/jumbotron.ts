@@ -31,6 +31,8 @@ export class Jumbotron {
   private preview: THREE.Object3D | null = null;
   private lastCountdown = -1;
   private lastDraw: ((c: CanvasRenderingContext2D, w: number, h: number) => void) | null = null;
+  /** Fired once per displayed countdown second (5…1) — Game hooks the tick sound here. */
+  onCountdownTick: ((secondsLeft: number) => void) | null = null;
 
   constructor(world: World) {
     // 2x resolution + 2x context scale: draw code keeps its 512x256 coordinate
@@ -111,6 +113,7 @@ export class Jumbotron {
     const s = Math.max(0, Math.ceil(secondsLeft));
     if (s === this.lastCountdown) return;
     this.lastCountdown = s;
+    if (s > 0) this.onCountdownTick?.(s);
     this.setPreview(null);
     this.draw((c, w, h) => {
       c.fillStyle = "#8892a8";
