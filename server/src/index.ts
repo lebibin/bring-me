@@ -24,9 +24,14 @@ export default {
     );
     // absent under `wrangler dev` — fall back so local bots never 429
     const ip = request.headers.get("CF-Connecting-IP") ?? "local";
+    // Browsers do NOT send Origin on same-origin GETs, so the strict
+    // no-Origin rejection (ALLOW_NO_ORIGIN=false in prod) only fits the
+    // websocket upgrade, which always carries one. The list/ping GETs are
+    // public read-only data — Origin-less is fine, the rate limiter bounds it.
+    const readOk = originOk || origin === null;
 
     if (url.pathname === "/lobby") {
-      if (!originOk) return new Response("forbidden origin", { status: 403 });
+      if (!readOk) return new Response("forbidden origin", { status: 403 });
       if (!(await env.LOBBY_LIMITER.limit({ key: ip })).success) {
         return new Response("rate limited", { status: 429 });
       }
@@ -37,16 +42,17 @@ export default {
 
     const m = url.pathname.match(/^\/room\/([A-Z0-9]{1,12})(\/ping)?$/);
     if (!m) return new Response(`bring me room server v${PROTOCOL_VERSION}`, { status: 200 });
-    if (!originOk) return new Response("forbidden origin", { status: 403 });
 
     const stub = env.ROOM.get(env.ROOM.idFromName(m[1]));
     if (m[2]) {
+      if (!readOk) return new Response("forbidden origin", { status: 403 });
       if (!(await env.LOBBY_LIMITER.limit({ key: ip })).success) {
         return new Response("rate limited", { status: 429 });
       }
       return withCors(await stub.fetch(request), origin);
     }
 
+    if (!originOk) return new Response("forbidden origin", { status: 403 });
     if (!(await env.ROOM_LIMITER.limit({ key: ip })).success) {
       return new Response("rate limited", { status: 429 });
     }
