@@ -15,6 +15,8 @@ export class CreatePanel {
   constructor(
     private readonly onChange: (sel: CreateSelection) => void,
     private readonly onPlace: () => void,
+    private readonly onPlayerHue: (hue: number) => void,
+    private readonly getPlayerHue: () => number,
   ) {
     this.root = document.getElementById("createPanel") as HTMLDivElement;
   }
@@ -32,8 +34,9 @@ export class CreatePanel {
           (a) => `<button data-arch="${a.id}"${a.id === this.sel.archetype ? ' class="sel"' : ""}>${a.name}</button>`,
         ).join("")}
       </div>
-      <label>color <input id="cp-hue" type="range" min="0" max="359" value="${this.sel.params.hue}" /></label>
+      <label>object color <input id="cp-hue" type="range" min="0" max="359" value="${this.sel.params.hue}" /></label>
       <label>size <input id="cp-scale" type="range" min="${SCALE_MIN}" max="${SCALE_MAX}" step="0.05" value="${this.sel.params.scale}" /></label>
+      <label>your color <input id="cp-phue" type="range" min="0" max="359" value="${this.getPlayerHue()}" /></label>
       <button class="place" id="cp-place">Place here (R)</button>
       <div class="status" id="cp-status">walk around — the ghost shows where it lands</div>`;
     this.statusEl = this.root.querySelector("#cp-status");
@@ -53,6 +56,9 @@ export class CreatePanel {
     this.root.querySelector<HTMLInputElement>("#cp-scale")?.addEventListener("input", (e) => {
       this.sel.params.scale = Number((e.target as HTMLInputElement).value);
       this.onChange(this.current());
+    });
+    this.root.querySelector<HTMLInputElement>("#cp-phue")?.addEventListener("input", (e) => {
+      this.onPlayerHue(Number((e.target as HTMLInputElement).value));
     });
     this.root.querySelector("#cp-place")?.addEventListener("click", () => this.onPlace());
     this.onChange(this.current());

@@ -1,5 +1,5 @@
-// Disconnect-resilience check against `wrangler dev`: ping/pong keepalive,
-// and a mid-round socket drop resumed via the welcome token — same playerId,
+﻿// Disconnect-resilience check against `wrangler dev`: ping/pong keepalive,
+// and a mid-round socket drop resumed via the welcome token â€” same playerId,
 // still a participant, finishes the delivery.
 // Usage: node server/test/reconnectbot.mjs   (exit 0 = pass; ~40s)
 // Needs Node >= 23.6 (type stripping: imports shared/src/*.ts directly).
@@ -29,7 +29,7 @@ function connect(name, resume) {
     const ws = new WebSocket(`${BASE}/room/${code}`);
     const bot = { name, ws, id: 0, x: 0, z: 0, yaw: 0, msgs: [], waiters: [] };
     ws.addEventListener("open", () =>
-      ws.send(JSON.stringify({ type: "hello", name, v: 1, ...(resume ? { resume } : {}) })),
+      ws.send(JSON.stringify({ type: "hello", name, v: 2, ...(resume ? { resume } : {}) })),
     );
     ws.addEventListener("message", (ev) => {
       const m = JSON.parse(ev.data);

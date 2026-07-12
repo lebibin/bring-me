@@ -26,8 +26,10 @@ import { Position, Yaw } from "../ecs/components.ts";
 import { RoomSocket } from "./socket.ts";
 import { initSlapSounds, playSlapSound } from "../audio.ts";
 import { CreatePanel } from "../ui/createPanel.ts";
-import { setPing, setScores, setStunCooldown, toast } from "../ui/hud.ts";
+import { setPing, setScores, setStunCooldown, toast, toastLogo } from "../ui/hud.ts";
 import type { LobbyUI } from "../ui/lobby.ts";
+
+const HUE_KEY = "bringme.playerHue";
 
 export class NetClient {
   game: Game | null = null;
@@ -41,6 +43,8 @@ export class NetClient {
   private posTimer: number | null = null;
   private stunCdUntil = 0;
   private panel: CreatePanel | null = null;
+  private hueSendTimer = 0;
+  private pendingHue: number | null = null;
   /** token that reclaims our playerId after a drop; survives reloads too */
   private resume: string | null = null;
   private pingTimer: number | null = null;
@@ -193,6 +197,33 @@ export class NetClient {
     this.socket?.send({ type: "placeObject", x: q2(pos.x), z: q2(pos.z) });
   }
 
+  /** Current blob color: server truth, else the saved preference, else the id hash. */
+  myHue(): number {
+    const me = this.players.find((p) => p.id === this.myId);
+    if (me) return me.hue;
+    const saved = Number(localStorage.getItem(HUE_KEY));
+    return Number.isFinite(saved) ? ((Math.round(saved) % 360) + 360) % 360 : (this.myId * 67) % 360;
+  }
+
+  /** Recolor own blob instantly; the wire send is throttled while the slider drags. */
+  hueAction(hue: number): void {
+    hue = ((Math.round(hue) % 360) + 360) % 360;
+    localStorage.setItem(HUE_KEY, String(hue));
+    this.game?.setPlayerHue(this.myId, hue);
+    const me = this.players.find((p) => p.id === this.myId);
+    if (me) me.hue = hue;
+    this.pendingHue = hue;
+    if (this.hueSendTimer === 0) {
+      this.hueSendTimer = window.setTimeout(() => {
+        this.hueSendTimer = 0;
+        if (this.pendingHue !== null) {
+          this.socket?.send({ type: "setHue", hue: this.pendingHue });
+          this.pendingHue = null;
+        }
+      }, 150);
+    }
+  }
+
   pickAction(archetype: string, hue: number, scale: number): void {
     this.socket?.send({ type: "pickObject", archetype, params: { hue, scale } });
     this.game?.setGhost(archetypeIndex(archetype), hue, scale);
@@ -215,6 +246,7 @@ export class NetClient {
           // would double every listener) and just resync room state; the
           // server re-sends propAdded/phase, snapshots self-heal the rest
           for (const p of m.players) if (p.id !== this.myId) this.game.addRemote(p.id);
+          for (const p of m.players) this.game.setPlayerHue(p.id, p.hue);
           toast("reconnected ✓", 1600);
           if (this.serverPhase !== "LOBBY") {
             this.enterLivePhase();
@@ -228,11 +260,19 @@ export class NetClient {
         game.fakeRoundsEnabled = false;
         game.setLocalSpawn(this.myId);
         for (const p of m.players) if (p.id !== this.myId) game.addRemote(p.id);
+        for (const p of m.players) game.setPlayerHue(p.id, p.hue);
         this.game = game;
         this.panel = new CreatePanel(
           (sel) => this.pickAction(sel.archetype, sel.params.hue, sel.params.scale),
           () => this.placeAction(),
+          (hue) => this.hueAction(hue),
+          () => this.myHue(),
         );
+        // restore the saved color preference from a previous session
+        const savedHue = localStorage.getItem(HUE_KEY);
+        if (savedHue !== null && Number.isFinite(Number(savedHue)) && Number(savedHue) !== this.myHue()) {
+          this.hueAction(Number(savedHue));
+        }
         this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals);
         this.onGameReady(game);
         initSlapSounds(); // start preloading before the first stun lands
@@ -254,10 +294,21 @@ export class NetClient {
         this.game?.setStage(m.settings.stage ?? 0);
         this.ui.updatePlayers(m.players, this.isHost(), m.settings);
         for (const p of m.players) if (p.id !== this.myId) this.game?.addRemote(p.id);
+        for (const p of m.players) this.game?.setPlayerHue(p.id, p.hue);
         break;
       case "playerJoined":
         this.game?.addRemote(m.player.id);
+        this.game?.setPlayerHue(m.player.id, m.player.hue);
         break;
+      case "hueChanged": {
+        const rec = this.players.find((p) => p.id === m.playerId);
+        if (rec) rec.hue = m.hue;
+        // own echo: skip if a newer local pick is still in flight
+        if (m.playerId !== this.myId || this.pendingHue === null) {
+          this.game?.setPlayerHue(m.playerId, m.hue);
+        }
+        break;
+      }
       case "playerLeft":
         this.game?.removeRemote(m.playerId);
         break;
@@ -292,7 +343,7 @@ export class NetClient {
         this.game?.applyGrabbed(m.playerId, m.propId);
         if (m.playerId === this.myId) {
           if (this.pending?.action === "grab" && this.pending.propId === m.propId) this.pending = null;
-          toast("BRING ME!", 1400);
+          toastLogo(1400);
         }
         break;
       case "dropped":

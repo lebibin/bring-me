@@ -21,10 +21,24 @@ export interface BlobParts {
   body: THREE.Group;
 }
 
+/** Blob body color for a picked hue — same vibrancy as prop meshes (propMeshes.ts mat()). */
+export function blobColor(hue: number): THREE.Color {
+  return new THREE.Color().setHSL((((hue % 360) + 360) % 360) / 360, 0.65, 0.55);
+}
+
+/** Repaint an existing blob (all limbs share one material instance). */
+export function recolorBlob(blob: THREE.Object3D, hue: number): void {
+  const color = blobColor(hue);
+  blob.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) (m.material as THREE.MeshStandardMaterial).color.copy(color);
+  });
+}
+
 export function buildBlob(hue: number): THREE.Group {
   const g = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL((((hue % 360) + 360) % 360) / 360, 0.18, 0.88),
+    color: blobColor(hue),
     roughness: 0.45,
     metalness: 0.02,
   });

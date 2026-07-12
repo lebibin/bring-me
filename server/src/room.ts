@@ -95,6 +95,8 @@ interface Attachment {
 
 interface PlayerState extends RulePlayer {
   name: string;
+  /** blob body color (0-359); defaults to a per-id hash until the player picks */
+  hue: number;
   y: number; // jump height, client-reported
   lastPosMs: number;
 }
@@ -245,6 +247,15 @@ export class BringMeRoom {
       case "placeObject":
         this.onPlace(p, msg.x, msg.z);
         break;
+      case "setHue": {
+        if (typeof msg.hue !== "number" || !Number.isFinite(msg.hue)) {
+          this.say(ws, { type: "err", code: "bad_input" });
+          break;
+        }
+        p.hue = ((Math.round(msg.hue) % 360) + 360) % 360;
+        this.broadcast({ type: "hueChanged", playerId: p.id, hue: p.hue });
+        break;
+      }
       case "grab":
         this.onGrab(p, msg.propId);
         break;
@@ -933,6 +944,7 @@ export class BringMeRoom {
     return {
       id,
       name,
+      hue: (id * 67) % 360, // same hash the client used before hues were pickable
       x: spawn.x,
       y: 0,
       z: spawn.z,
@@ -949,7 +961,7 @@ export class BringMeRoom {
   }
 
   private info(p: PlayerState): PlayerInfo {
-    return { id: p.id, name: p.name, isHost: p.id === this.hostId };
+    return { id: p.id, name: p.name, isHost: p.id === this.hostId, hue: p.hue };
   }
 
   private persist(): void {

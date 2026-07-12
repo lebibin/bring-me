@@ -1,4 +1,4 @@
-// Full scripted match against `wrangler dev`: 3 bots play every mechanic.
+﻿// Full scripted match against `wrangler dev`: 3 bots play every mechanic.
 //   round A: walk-deliver     round B: stun-steal + throw-deliver
 //   round C: nobody grabs -> timer expires, creator's LoS accrual x2
 // Usage: node server/test/matchbot.mjs   (exit 0 = pass; ~90s, round C waits
@@ -34,7 +34,7 @@ function connect(name) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${BASE}/room/${code}`);
     const bot = { name, ws, id: 0, x: 0, z: 0, yaw: 0, msgs: [], waiters: [] };
-    ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "hello", name, v: 1 })));
+    ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "hello", name, v: 2 })));
     ws.addEventListener("message", (ev) => {
       const m = JSON.parse(ev.data);
       bot.msgs.push(m);
@@ -70,7 +70,7 @@ function send(bot, msg) {
 
 /**
  * Walk a bot server-side by legal pos reports every 66 ms. Step must stay
- * under the server clamp: 6*0.066*1.5≈0.59 free, 4.2*0.066*1.5≈0.41 carrying.
+ * under the server clamp: 6*0.066*1.5â‰ˆ0.59 free, 4.2*0.066*1.5â‰ˆ0.41 carrying.
  */
 async function walk(bot, tx, tz, stopAt = 0.4, step = 0.5) {
   for (let i = 0; i < 500; i++) {
@@ -119,7 +119,7 @@ try {
   // --- CREATE: distinct objects at known spots, distinguishable by hue ---
   send(A, { type: "start", settings: { createSecs: 60, roundSecs: 30 } });
   await waitFor(A, (m) => m.type === "phase" && m.name === "CREATE", "phase CREATE");
-  // the yard now has off-limits zones (pool/deck/house/playground) — search
+  // the yard now has off-limits zones (pool/deck/house/playground) â€” search
   // outward from each preferred corner for the nearest legal spot
   const findSpot = (px, pz) => {
     for (let ring = 0; ring < 12; ring++) {
@@ -207,7 +207,7 @@ try {
       results.push({ creator, mode: "throw", deliverer: thief.id });
     } else {
       // TIMEOUT: a non-creator stares at the object (LoS accrual), nobody
-      // grabs — the round timer expires and the creator's accrual doubles.
+      // grabs â€” the round timer expires and the creator's accrual doubles.
       const watcher = bots.find((b) => b.id !== creator);
       const wdx = spot.x - watcher.x, wdz = spot.z - watcher.z, wd = Math.hypot(wdx, wdz);
       const watchFrom = 8;

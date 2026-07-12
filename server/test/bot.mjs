@@ -1,4 +1,4 @@
-// Scripted WebSocket bots against a running `wrangler dev` (ws://127.0.0.1:8787).
+﻿// Scripted WebSocket bots against a running `wrangler dev` (ws://127.0.0.1:8787).
 // Usage: node server/test/bot.mjs   (exit 0 = pass)
 // Needs Node >= 22 (global WebSocket).
 
@@ -19,7 +19,7 @@ function connect(name) {
     const ws = new WebSocket(`${BASE}/room/${code}`);
     const bot = { name, ws, id: 0, msgs: [], waiters: [] };
     ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({ type: "hello", name, v: 1 }));
+      ws.send(JSON.stringify({ type: "hello", name, v: 2 }));
     });
     ws.addEventListener("message", (ev) => {
       const m = JSON.parse(ev.data);
@@ -93,7 +93,7 @@ try {
   );
   assert(true, `A sees B at x=${snapA.players.find((p) => p.id === 2).x} (walked ~3.5)`);
 
-  // teleport must be clamped — only look at snapshots that arrive AFTER the
+  // teleport must be clamped â€” only look at snapshots that arrive AFTER the
   // teleport (waitFor scans the whole buffer, and the first-ever snapshot has
   // B at its seed-dependent spawn point)
   a.msgs.length = 0;
@@ -102,7 +102,7 @@ try {
   const snap2 = await waitFor(a, (m) => m.type === "snapshot", "snapshot after teleport");
   const bp = snap2.players.find((p) => p.id === 2);
   // clamp allows at most PLAYER_SPEED * 1s * slack per report (~9 m worst case
-  // with real latency gaps) — a real teleport would show ~29 m
+  // with real latency gaps) â€” a real teleport would show ~29 m
   const jump = Math.hypot(bp.x - 3.5, bp.z - 0);
   assert(jump < 10, `teleport clamped (moved ${jump.toFixed(2)} m, not ~30)`);
 

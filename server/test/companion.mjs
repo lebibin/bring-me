@@ -1,4 +1,4 @@
-// Companion bot for browser e2e checks: joins an existing room, places its
+﻿// Companion bot for browser e2e checks: joins an existing room, places its
 // object at a deterministic spot (plaza + facing*12), and autonomously plays
 // any round that is NOT its own (walk-delivers the target). Exits on matchEnd.
 // Usage: node server/test/companion.mjs <ROOMCODE>
@@ -49,7 +49,7 @@ function mySpot() {
   return { x: 0, z: 0 };
 }
 
-ws.addEventListener("open", () => send({ type: "hello", name: "companion", v: 1 }));
+ws.addEventListener("open", () => send({ type: "hello", name: "companion", v: 2 }));
 ws.addEventListener("message", async (ev) => {
   const m = JSON.parse(ev.data);
   switch (m.type) {
@@ -76,14 +76,14 @@ ws.addEventListener("message", async (ev) => {
       break;
     case "reveal":
       if (m.params.hue === MY_HUE) {
-        console.log("round: my own object — idling, the browser should deliver it");
+        console.log("round: my own object â€” idling, the browser should deliver it");
         acting = false;
       } else {
         acting = true;
         const creator = [...objectSpots.keys()].find((id) => id !== bot.id);
         const spot = objectSpots.get(creator);
         if (!spot) break;
-        console.log("round: browser's object — companion delivering");
+        console.log("round: browser's object â€” companion delivering");
         await sleep(3500); // let REVEAL end, SEEK begin
         if (!acting) break;
         await walk(spot.x, spot.z, 1.2);

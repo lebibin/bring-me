@@ -31,7 +31,7 @@ import {
 import { createScene, buildStatics, disposeStatics, type SceneCtx } from "./render/scene.ts";
 import { buildPropMesh } from "./render/propMeshes.ts";
 import { snapshotProp } from "./render/propShot.ts";
-import { buildBlob, type BlobParts } from "./render/blob.ts";
+import { buildBlob, recolorBlob, type BlobParts } from "./render/blob.ts";
 import { Jumbotron } from "./render/jumbotron.ts";
 import { world, object3ds, spawnPlayer, spawnProp, spawnNpc } from "./ecs/world.ts";
 import { addComponent, removeComponent, removeEntity } from "bitecs";
@@ -74,6 +74,7 @@ export class Game {
   stunUntilSim = 0;
   netPhase: { name: string; endsAt: number; round?: number; totalRounds?: number } | null = null;
   private readonly remoteEids = new Map<number, number>();
+  private readonly playerHues = new Map<number, number>();
   private readonly interpBufs = new Map<number, { rt: number; x: number; y: number; z: number; yaw: number }[]>();
   private readonly stunFx = new Map<number, number>(); // eid -> simTime until wobble
   private readonly walkAnim = new Map<number, { phase: number; lastX: number; lastZ: number }>();
@@ -252,9 +253,18 @@ export class Game {
     Position.z[this.playerEid] = s.z;
   }
 
+  /** Repaint a player's blob (and remember the hue for late spawns). */
+  setPlayerHue(netId: number, hue: number): void {
+    this.playerHues.set(netId, hue);
+    const eid = netId === this.localNetId ? this.playerEid : this.remoteEids.get(netId);
+    if (eid === undefined) return;
+    const obj = object3ds.get(eid);
+    if (obj) recolorBlob(obj, hue);
+  }
+
   addRemote(netId: number): void {
     if (netId === this.localNetId || this.remoteEids.has(netId)) return;
-    const blob = buildBlob((netId * 67) % 360);
+    const blob = buildBlob(this.playerHues.get(netId) ?? (netId * 67) % 360);
     this.ctx.scene.add(blob);
     const s = this.data.spawnPoints[(netId - 1) % MAX_PLAYERS];
     const eid = spawnPlayer(s.x, s.z, 0, netId, false, blob);

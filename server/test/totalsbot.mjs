@@ -1,4 +1,4 @@
-// Room-lifetime standings check against `wrangler dev`: two bots play TWO
+﻿// Room-lifetime standings check against `wrangler dev`: two bots play TWO
 // quick walk-deliver matches in one room and assert the cumulative `totals`
 // (welcome/lobby/matchEnd) carry across games.
 // Usage: node server/test/totalsbot.mjs   (exit 0 = pass; ~2 min)
@@ -30,7 +30,7 @@ function connect(name) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${BASE}/room/${code}`);
     const bot = { name, ws, id: 0, x: 0, z: 0, yaw: 0, msgs: [], waiters: [] };
-    ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "hello", name, v: 1 })));
+    ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "hello", name, v: 2 })));
     ws.addEventListener("message", (ev) => {
       const m = JSON.parse(ev.data);
       bot.msgs.push(m);

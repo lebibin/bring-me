@@ -25,6 +25,8 @@ export interface PlayerInfo {
   id: number;
   name: string;
   isHost: boolean;
+  /** blob body color, degrees 0-359 (player-picked; defaults to a per-id hash) */
+  hue: number;
 }
 
 /**
@@ -57,6 +59,7 @@ export type C2S =
   | { type: "stun" }
   | { type: "pickObject"; archetype: string; params: PropParams }
   | { type: "placeObject"; x: number; z: number }
+  | { type: "setHue"; hue: number }
   | { type: "leave" };
 
 // ---------- S2C ----------
@@ -125,6 +128,7 @@ export type S2C =
   | { type: "matchEnd"; scores: Record<number, number>; totals: RoomTotals }
   | { type: "playerJoined"; player: PlayerInfo }
   | { type: "playerLeft"; playerId: number }
+  | { type: "hueChanged"; playerId: number; hue: number }
   | { type: "err"; code: ErrCode };
 
 export type ErrCode =

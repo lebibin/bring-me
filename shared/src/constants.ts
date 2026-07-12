@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2; // v2: PlayerInfo.hue + setHue/hueChanged
 
 // --- Networking rates ---
 export const TICK_HZ = 15;
