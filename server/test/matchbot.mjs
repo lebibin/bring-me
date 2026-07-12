@@ -1,6 +1,6 @@
 ﻿// Full scripted match against `wrangler dev`: 3 bots play every mechanic.
 //   round A: walk-deliver     round B: stun-steal + throw-deliver
-//   round C: nobody grabs -> timer expires, creator's LoS accrual x2
+//   round C: nobody grabs -> timer expires, creator banks UNFOUND_PTS
 // Usage: node server/test/matchbot.mjs   (exit 0 = pass; ~90s, round C waits
 // out a real 30s round timer)
 // Needs Node >= 23.6 (type stripping: imports shared/src/*.ts directly).
@@ -11,6 +11,7 @@ import {
   GRAB_RADIUS,
   NPC_RADIUS,
   STUN_RANGE,
+  UNFOUND_PTS,
   generateWorld,
   placementValid,
   stepBallistic,
@@ -221,7 +222,7 @@ try {
       re._seen = true;
       assert(re.found === false, "timeout round marked unfound");
       assert(re.creatorId === creator, "unfound round credits the right creator");
-      assert(re.creatorPoints > 0, `creator earned LoS points x2 (+${re.creatorPoints})`);
+      assert(re.creatorPoints === UNFOUND_PTS, `unfound creator earned +${re.creatorPoints}`);
       results.push({ creator, mode: "timeout", creatorPoints: re.creatorPoints });
     }
   }

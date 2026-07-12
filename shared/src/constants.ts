@@ -67,17 +67,11 @@ export const PROP_REST_Y = 0.4; // resting height of a loose prop
 export const CARRY_HEIGHT = 0.95; // carried prop rides at chest height...
 export const CARRY_FORWARD = 0.55; // ...held out in front of the carrier
 
-// --- Scoring (tunables) ---
-// Creator accrual while object is in someone's view unseen. Kept low relative
-// to DELIVER_PTS: a full round of hiding in plain sight ≈ half a delivery,
-// ×2 unfound ≈ one delivery. (5/s playtested as way too hot: 214 pts/round.)
-export const LOS_PTS_PER_SEC = 1;
-export const LOS_RANGE = 15;
-export const LOS_HALF_ANGLE = Math.PI / 4; // +/- 45deg of viewer yaw
-export const UNFOUND_MULT = 2; // creator accrual multiplier when round times out unfound
-export const DELIVER_PTS = 100; // fixed delivery award (default mode)
-export const DELIVER_MULT = 1.25; // alternative: multiply deliverer's score instead
-export const USE_DELIVER_MULT = false;
+// --- Scoring ---
+// Dead simple, party-readable: bring someone's item to the NPC = 1 point;
+// your own item surviving the whole round unfound = 2 points.
+export const DELIVER_PTS = 1;
+export const UNFOUND_PTS = 2;
 export const ALLOW_SELF_GRAB = false; // creators may not grab their own object
 
 // --- Match flow ---

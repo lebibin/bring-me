@@ -59,7 +59,6 @@ import {
   type World,
 } from "@bringme/shared";
 import {
-  accrue,
   advanceRound,
   beginRounds,
   createdPropId,
@@ -76,7 +75,6 @@ import {
   canGrab,
   canStun,
   carriedDelivery,
-  losActive,
   nearestStunVictim,
   type RulePlayer,
   type RuleTarget,
@@ -867,13 +865,6 @@ export class BringMeRoom {
           // a decoy bonked the NPC — tell the thrower it's the wrong one
           d.wrongHit = true;
           this.sayTo(d.thrownBy, { type: "err", code: "wrong" });
-        }
-      }
-      // hide-in-plain-sight accrual (target may still be untouched at home)
-      if (this.match && this.match.phase === "SEEK" && target >= 0) {
-        const td = this.ensureDyn(target);
-        if (td && losActive(this.ruleTarget(td), this.players.values())) {
-          accrue(m, TICK_MS);
         }
       }
     }

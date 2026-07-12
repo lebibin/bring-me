@@ -11,10 +11,9 @@ import {
   COUNTDOWN_MS,
   CREATED_PROP_ID_BASE,
   DELIVER_PTS,
-  LOS_PTS_PER_SEC,
   RESOLVE_MS,
   REVEAL_MS,
-  UNFOUND_MULT,
+  UNFOUND_PTS,
   mulberry32,
   shuffle,
   type MatchSettings,
@@ -31,7 +30,6 @@ export interface MatchState {
   roundOrder: number[]; // creator ids, seeded shuffle at beginRounds
   round: number; // index into roundOrder
   scores: Record<number, number>;
-  accrual: number; // creator's LoS points this round (pre-multiplier)
   found: boolean;
   deliverer: number;
   phaseEndsAt: number; // epoch ms; 0 = untimed
@@ -48,7 +46,6 @@ export function newMatch(seed: number, settings: MatchSettings, playerIds: numbe
     roundOrder: [],
     round: -1,
     scores,
-    accrual: 0,
     found: false,
     deliverer: 0,
     phaseEndsAt: now + settings.createSecs * 1000,
@@ -76,7 +73,6 @@ export function beginRounds(m: MatchState, now: number): void {
 /** Move to the next round's COUNTDOWN, or MATCH_END when exhausted. */
 export function advanceRound(m: MatchState, now: number): "round" | "end" {
   m.round += 1;
-  m.accrual = 0;
   m.found = false;
   m.deliverer = 0;
   if (m.round >= m.roundOrder.length) {
@@ -108,11 +104,6 @@ export function toSeek(m: MatchState, now: number): void {
   m.phaseEndsAt = now + m.settings.roundSecs * 1000;
 }
 
-/** Accrue creator LoS points for dtMs of "visible but unnoticed" time. */
-export function accrue(m: MatchState, dtMs: number): void {
-  m.accrual += (LOS_PTS_PER_SEC * dtMs) / 1000;
-}
-
 export interface RoundResult {
   found: boolean;
   creatorId: number;
@@ -126,7 +117,7 @@ export function resolveRound(m: MatchState, now: number, deliverer: number): Rou
   const creatorId = currentCreator(m);
   m.found = deliverer !== 0;
   m.deliverer = deliverer;
-  const creatorPoints = Math.round(m.accrual * (m.found ? 1 : UNFOUND_MULT));
+  const creatorPoints = m.found ? 0 : UNFOUND_PTS;
   const delivererPoints = m.found ? DELIVER_PTS : 0;
   m.scores[creatorId] = (m.scores[creatorId] ?? 0) + creatorPoints;
   if (m.found) m.scores[deliverer] = (m.scores[deliverer] ?? 0) + delivererPoints;

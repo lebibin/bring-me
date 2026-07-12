@@ -3,14 +3,12 @@ import {
   COUNTDOWN_MS,
   CREATED_PROP_ID_BASE,
   DELIVER_PTS,
-  LOS_PTS_PER_SEC,
   RESOLVE_MS,
   REVEAL_MS,
-  UNFOUND_MULT,
+  UNFOUND_PTS,
 } from "@bringme/shared";
 import {
   advanceRound,
-  accrue,
   beginRounds,
   currentCreator,
   currentTarget,
@@ -69,36 +67,34 @@ describe("match state machine", () => {
     expect(currentTarget(m)?.propId).toBe(CREATED_PROP_ID_BASE + currentCreator(m));
   });
 
-  it("unfound round doubles the creator's accrual", () => {
+  it("unfound round pays the creator UNFOUND_PTS", () => {
     const m = matchWithObjects();
     beginRounds(m, NOW);
     toReveal(m, NOW);
     toSeek(m, NOW);
-    accrue(m, 10_000); // 10s of LoS
-    const base = LOS_PTS_PER_SEC * 10;
     const creator = currentCreator(m);
     const r = resolveRound(m, NOW, 0);
     expect(r.found).toBe(false);
-    expect(r.creatorPoints).toBe(base * UNFOUND_MULT);
-    expect(m.scores[creator]).toBe(base * UNFOUND_MULT);
+    expect(r.creatorPoints).toBe(UNFOUND_PTS);
+    expect(r.delivererPoints).toBe(0);
+    expect(m.scores[creator]).toBe(UNFOUND_PTS);
     expect(m.phase).toBe("RESOLVE");
     expect(m.phaseEndsAt).toBe(NOW + RESOLVE_MS);
   });
 
-  it("delivery awards the deliverer and pays creator accrual unmultiplied", () => {
+  it("delivery pays the deliverer DELIVER_PTS and the creator nothing", () => {
     const m = matchWithObjects();
     beginRounds(m, NOW);
     toReveal(m, NOW);
     toSeek(m, NOW);
-    accrue(m, 4_000);
-    const base = LOS_PTS_PER_SEC * 4;
     const creator = currentCreator(m);
     const deliverer = [1, 2, 3].find((id) => id !== creator)!;
     const r = resolveRound(m, NOW, deliverer);
     expect(r.found).toBe(true);
     expect(r.delivererPoints).toBe(DELIVER_PTS);
+    expect(r.creatorPoints).toBe(0);
     expect(m.scores[deliverer]).toBe(DELIVER_PTS);
-    expect(m.scores[creator]).toBe(base);
+    expect(m.scores[creator]).toBe(0);
   });
 
   it("runs exactly one round per object then MATCH_END", () => {
@@ -116,14 +112,21 @@ describe("match state machine", () => {
     expect(m.phase).toBe("MATCH_END");
   });
 
-  it("accrual resets between rounds", () => {
+  it("scores accumulate across rounds", () => {
     const m = matchWithObjects();
     beginRounds(m, NOW);
+    // round 1: unfound; round 2: delivered by whoever isn't that round's creator
     toReveal(m, NOW);
     toSeek(m, NOW);
-    accrue(m, 6_000);
+    const creator1 = currentCreator(m);
     resolveRound(m, NOW, 0);
     advanceRound(m, NOW);
-    expect(m.accrual).toBe(0);
+    toReveal(m, NOW);
+    toSeek(m, NOW);
+    const deliverer = [1, 2, 3].find((id) => id !== currentCreator(m))!;
+    resolveRound(m, NOW, deliverer);
+    const expected = (id: number) =>
+      (id === creator1 ? UNFOUND_PTS : 0) + (id === deliverer ? DELIVER_PTS : 0);
+    for (const id of [1, 2, 3]) expect(m.scores[id]).toBe(expected(id));
   });
 });

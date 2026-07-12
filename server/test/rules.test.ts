@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DELIVER_PTS, GRAB_RADIUS, LOS_RANGE, NPC_RADIUS, STUN_RANGE } from "@bringme/shared";
+import { DELIVER_PTS, GRAB_RADIUS, NPC_RADIUS, STUN_RANGE, UNFOUND_PTS } from "@bringme/shared";
 import {
   airborneDelivery,
   canGrab,
   canStun,
   carriedDelivery,
-  losActive,
   nearestStunVictim,
   type RulePlayer,
   type RuleTarget,
@@ -65,25 +64,6 @@ describe("stun rules", () => {
   });
 });
 
-describe("line-of-sight accrual", () => {
-  it("is active when a non-creator faces the target in range", () => {
-    const t = target({ x: 0, z: 5 });
-    const looking = player({ id: 2, x: 0, z: 0, yaw: 0 }); // facing +z
-    expect(losActive(t, [looking])).toBe(true);
-  });
-  it("ignores the creator's own gaze", () => {
-    const t = target({ x: 0, z: 5, creatorId: 2 });
-    expect(losActive(t, [player({ id: 2, yaw: 0 })])).toBe(false);
-  });
-  it("is inactive outside the cone or range, or while held/airborne", () => {
-    const t = target({ x: 0, z: 5 });
-    expect(losActive(t, [player({ id: 2, yaw: Math.PI })])).toBe(false); // facing away
-    expect(losActive(target({ x: 0, z: LOS_RANGE + 1 }), [player({ id: 2, yaw: 0 })])).toBe(false);
-    expect(losActive(target({ x: 0, z: 5, heldBy: 3 }), [player({ id: 2, yaw: 0 })])).toBe(false);
-    expect(losActive(target({ x: 0, z: 5, airborne: true }), [player({ id: 2, yaw: 0 })])).toBe(false);
-  });
-});
-
 describe("delivery", () => {
   it("carried: carrier overlapping the NPC delivers", () => {
     expect(carriedDelivery(player({ x: 0.5, z: 0 }), 0, 0)).toBe(true);
@@ -94,7 +74,8 @@ describe("delivery", () => {
     expect(airborneDelivery(NPC_RADIUS + 0.5, 1.0, 0, 0, 0)).toBe(false);
     expect(airborneDelivery(0.5, 3.0, 0, 0, 0)).toBe(false); // sailed over
   });
-  it("DELIVER_PTS is sane relative to LoS accrual", () => {
-    expect(DELIVER_PTS).toBeGreaterThan(0);
+  it("point values follow the design: unfound (2) beats a delivery (1)", () => {
+    expect(DELIVER_PTS).toBe(1);
+    expect(UNFOUND_PTS).toBe(2);
   });
 });

@@ -4,8 +4,8 @@
 Players (identical low-poly blobs, "slops") each create + hide one catalog
 object in a seeded world; each round a jumbotron announces one object and
 everyone races to deliver it to the NPC blob (walk into him or throw it).
-Full design + milestones: see the approved plan (scoring: creator accrues
-line-of-sight points, x2 if unfound; deliverer gets a fixed award).
+Full design + milestones: see the approved plan (scoring: deliver someone's
+item = 1 pt; your own item surviving the round unfound = 2 pts).
 
 ## Architecture
 

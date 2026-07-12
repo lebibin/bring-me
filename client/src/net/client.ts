@@ -24,7 +24,7 @@ import {
 import { Game } from "../game.ts";
 import { Position, Yaw } from "../ecs/components.ts";
 import { RoomSocket } from "./socket.ts";
-import { initSlapSounds, playSlapSound } from "../audio.ts";
+import { initSlapSounds, playSlapSound, playSound } from "../audio.ts";
 import { CreatePanel } from "../ui/createPanel.ts";
 import { setPing, setScores, setStunCooldown, toast, toastLogo } from "../ui/hud.ts";
 import type { LobbyUI } from "../ui/lobby.ts";
@@ -364,13 +364,12 @@ export class NetClient {
       case "delivered":
         toast(`${this.nameOf(m.byId)} delivered it! +${m.points}`, 2600);
         this.game?.jumbotron.setWin("DELIVERED!");
+        playSound("win");
         break;
       case "roundEnd":
         if (!m.found) {
-          toast(`unfound! ${this.nameOf(m.creatorId)} +${m.creatorPoints} (×2)`, 3000);
+          toast(`unfound! ${this.nameOf(m.creatorId)} +${m.creatorPoints}`, 3000);
           this.game?.jumbotron.setWin("NOBODY FOUND IT!");
-        } else if (m.creatorPoints > 0) {
-          toast(`${this.nameOf(m.creatorId)} sneaky bonus +${m.creatorPoints}`, 2200);
         }
         this.scores = m.scores;
         break;
