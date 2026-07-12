@@ -48,7 +48,8 @@ export interface NetProp {
 // ---------- C2S ----------
 
 export type C2S =
-  | { type: "hello"; name: string; v: number; resume?: string }
+  /** `pub` only honored on the very first hello a brand-new room receives */
+  | { type: "hello"; name: string; v: number; resume?: string; pub?: boolean }
   /** keepalive + RTT probe; answered by the DO's auto-response without waking it */
   | { type: "ping" }
   | { type: "start"; settings: MatchSettings }
@@ -93,6 +94,8 @@ export type S2C =
       totals: RoomTotals;
       /** opaque token — present it in `hello.resume` to reclaim this playerId */
       resume: string;
+      /** room is listed on the public lobby browser */
+      isPublic?: boolean;
     }
   | { type: "pong" }
   | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings; totals: RoomTotals }
@@ -145,6 +148,22 @@ export type ErrCode =
   | "bad_phase"
   | "bad_input"
   | "cooldown";
+
+// ---------- Lobby HTTP API (GET /lobby) ----------
+// Rides HTTP rather than the room socket, but it's still wire contract.
+
+/** One row in GET /lobby — public rooms only. */
+export interface LobbyRoomEntry {
+  code: string;
+  hostName: string;
+  players: number;
+  /** coarse room status; mid-match joiners spectate until the next game */
+  status: "lobby" | "match";
+}
+
+export interface LobbyListResponse {
+  rooms: LobbyRoomEntry[];
+}
 
 export function encode(msg: C2S | S2C): string {
   return JSON.stringify(msg);

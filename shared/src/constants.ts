@@ -31,7 +31,8 @@ export const MIN_DECOYS_PER_ARCHETYPE = 3;
 export const PLAZA_KEEPOUT = 8; // no scatter props within this radius of the plaza
 export const SPAWN_KEEPOUT = 2;
 export const SPAWN_RING_RADIUS = 7; // spawn points ring around the plaza
-export const MAX_PLAYERS = 8;
+export const SPAWN_MIN_GAP = 1.2; // no two spawn points closer than this
+export const MAX_PLAYERS = 10;
 // Player-created props get ids at/above this; worldgen decoys count up from 0.
 export const CREATED_PROP_ID_BASE = 100000;
 
@@ -85,3 +86,16 @@ export const ROUND_SECS_MAX = 300;
 export const COUNTDOWN_MS = 5000;
 export const REVEAL_MS = 3000;
 export const RESOLVE_MS = 5000;
+
+// --- Public lobby / launch guardrails ---
+export const LOBBY_LIST_MAX = 20; // rooms served by GET /lobby (client pings each)
+export const LOBBY_POLL_MS = 5000; // browse-screen refresh
+export const REGISTRY_STALE_MS = 10 * 60_000; // prune entries not seen for this long
+export const REGISTRY_REFRESH_MS = 4 * 60_000; // occupied public rooms heartbeat via alarm
+export const REGISTRY_MAX_ROOMS = 200; // hard cap on stored registry rows
+// Per-socket inbound message budget: pos@15Hz + actions leaves headroom under
+// the sustained rate; the burst absorbs a reconnect re-hello + catch-up.
+export const WS_MSG_RATE = 25; // sustained msgs/sec/socket
+export const WS_MSG_BURST = 60; // token-bucket capacity
+export const WS_RATE_GRACE = 20; // dropped msgs tolerated before close 1008
+export const RESUME_TOKENS_MAX = 64; // FIFO cap on stored resume tokens

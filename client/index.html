@@ -232,6 +232,24 @@
       #lobby .stages .stageBtn:disabled { opacity: 0.6; cursor: default; }
       #lobby .stages .stageBtn.sel:disabled { opacity: 1; }
       #lobby .status { font-size: 24px; min-height: 32px; color: #8892a8; }
+      #lobby .pubRow {
+        display: flex; align-items: center; justify-content: center; gap: 12px;
+        font-size: 22px; opacity: 0.85; cursor: pointer;
+      }
+      #lobby .pubRow input { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
+      #lobby ul.rooms {
+        min-height: 0; max-height: 320px; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      #lobby .rooms .empty { font-size: 20px; color: #8892a8; text-align: center; line-height: 2.4; }
+      #lobby .roomRow {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+        width: 100%; background: #0e1016; color: var(--ink);
+        border: 1px solid #333a4d; border-radius: 12px; padding: 14px 18px; font-size: 22px;
+      }
+      #lobby .roomRow:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); filter: none; transform: none; }
+      #lobby .roomRow .rhost { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #lobby .roomRow .rmeta { color: #8892a8; font-weight: 500; white-space: nowrap; }
       #lobby .panel.scoreboard { width: min(440px, 90vw); padding: 52px 44px; gap: 18px; }
       #lobby .scoreboard h2 { font-size: 36px; letter-spacing: 0.08em; color: var(--accent); }
       #lobby .scoreboard ul { min-height: 0; }

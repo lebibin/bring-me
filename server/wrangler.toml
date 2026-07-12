@@ -2,6 +2,12 @@ name = "bringme-room"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"
 
+# Dev: bots connect Origin-less and no extra origins are needed
+# (same-host/localhost are always allowed in code).
+[vars]
+ALLOWED_ORIGINS = ""
+ALLOW_NO_ORIGIN = "true"
+
 # One Durable Object per room code keeps every player in a room on the same
 # instance — the DO is the authoritative game server (adapted from
 # salpakan/infra/signal, upgraded from 2-seat relay to N-seat authority).
@@ -9,26 +15,80 @@ compatibility_date = "2026-06-01"
 name = "ROOM"
 class_name = "BringMeRoom"
 
+# Single-instance public-room registry (idFromName("lobby")).
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "LobbyRegistry"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BringMeRoom"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["LobbyRegistry"]
+
+# Per-IP abuse bounds (Workers Rate Limiting binding, per-colo approximate).
+# ROOM_LIMITER: websocket upgrades — reconnect backoff peaks ~6/min, so 20 is
+# generous for players and stingy for floods. LOBBY_LIMITER: browse-screen
+# list polls (12/min) + up to LOBBY_LIST_MAX latency pings per refresh.
+[[unsafe.bindings]]
+name = "ROOM_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+[[unsafe.bindings]]
+name = "LOBBY_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 120, period = 60 }
+
 # Production: ONE Worker serves both the game server and the built client as
 # static assets (same origin -> the page's own host is the WebSocket host, no
-# CORS, no allowlist entries). Deploy with:
+# CORS, no allowlist entries needed for the web build; the itch.io build IS
+# cross-origin, hence ALLOWED_ORIGINS). Deploy with:
 #   npm run build -w @bringme/client && npx wrangler deploy --env production
 # Kept in an environment so plain `wrangler dev` never requires client/dist.
 [env.production]
 name = "bringme"
 
+# The exact itch iframe origin must be confirmed on first upload (devtools →
+# the WS request's Origin header) — adjusting this var is a redeploy, not a
+# code change. ALLOW_NO_ORIGIN=false: browsers always send Origin; only
+# non-browser tooling doesn't, and it has no business in production.
+[env.production.vars]
+ALLOWED_ORIGINS = "https://html-classic.itch.zone,https://html.itch.zone,*.itch.zone"
+ALLOW_NO_ORIGIN = "false"
+
 [env.production.assets]
 directory = "../client/dist"
-run_worker_first = ["/room/*"]
+run_worker_first = ["/room/*", "/lobby"]
 
 [[env.production.durable_objects.bindings]]
 name = "ROOM"
 class_name = "BringMeRoom"
 
+[[env.production.durable_objects.bindings]]
+name = "LOBBY"
+class_name = "LobbyRegistry"
+
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["BringMeRoom"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["LobbyRegistry"]
+
+[[env.production.unsafe.bindings]]
+name = "ROOM_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+[[env.production.unsafe.bindings]]
+name = "LOBBY_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 120, period = 60 }

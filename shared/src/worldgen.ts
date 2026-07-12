@@ -16,6 +16,7 @@ import {
   MIN_DECOYS_PER_ARCHETYPE,
   PLAZA_KEEPOUT,
   SPAWN_KEEPOUT,
+  SPAWN_MIN_GAP,
   SPAWN_RING_RADIUS,
   MAX_PLAYERS,
 } from "./constants.ts";
@@ -280,11 +281,12 @@ export function generateWorld(seed: number, stage = 0): World {
       }
     }
     // random sampling exhausted: deterministic sweep for the spot with the
-    // MOST clearance — never dump a fixture on top of another one
+    // MOST clearance — never dump a fixture on top of another one (the grid
+    // must be fine enough that clear pockets between blockers are found)
     let best = { x: 0, z: 0 };
     let bestClear = -Infinity;
-    for (let gx = -HALF + inset; gx <= HALF - inset; gx += 2.5) {
-      for (let gz = -HALF + inset; gz <= HALF - inset; gz += 2.5) {
+    for (let gx = -HALF + inset; gx <= HALF - inset; gx += 1.25) {
+      for (let gz = -HALF + inset; gz <= HALF - inset; gz += 1.25) {
         let clear = Infinity;
         for (const b of blockers) clear = Math.min(clear, Math.hypot(gx - b.x, gz - b.z) - b.r);
         if (clear > bestClear) {
@@ -316,35 +318,48 @@ export function generateWorld(seed: number, stage = 0): World {
   };
   blockers.push({ x: sandpit.x, z: sandpit.z, r: 3.4 });
 
+  // doghouse tucked against the house, past the door end — fixed position, so
+  // it must be a blocker BEFORE the pickSpot wave (playground2 once landed on it)
+  const doghouse = {
+    x: hInfo.wx + hInfo.nx * 4 + hInfo.tx * (houseLat + 14),
+    z: hInfo.wz + hInfo.nz * 4 + hInfo.tz * (houseLat + 14),
+    rot: Math.atan2(hInfo.nx, hInfo.nz),
+  };
+  blockers.push({ x: doghouse.x, z: doghouse.z, r: 2 });
+  // bbq + picnic land in a house-relative band computed AFTER this wave (their
+  // randRanges must keep their place in the RNG stream) — reserve the whole
+  // possible band now so no picked fixture can end up under them
+  blockers.push({
+    x: hInfo.wx + hInfo.nx * 7 + hInfo.tx * (houseLat + 11.25),
+    z: hInfo.wz + hInfo.nz * 7 + hInfo.tz * (houseLat + 11.25),
+    r: 5, // covers bbq/picnic extents + the planter nudge (worst case 4.81)
+  });
+
+  // Picked fixtures, LARGEST footprint first: on crowded stages (the park's
+  // 13 trees) a small-first order could exhaust sampling for the playground
+  // or pond and fall back onto another fixture — small items always find a
+  // pocket, and any residual fallback overlap shrinks with fixture size.
+  const playground2 = { ...pickSpot(6), rot: randRange(rng, 0, Math.PI * 2) };
+  const pondSpot = pickSpot(5.5);
+  const pond = { ...pondSpot, r: randRange(rng, 2.6, 3.4) };
+  const soccer = { ...pickSpot(5), rot: randRange(rng, 0, Math.PI * 2) };
   const trees: { x: number; z: number; s: number }[] = [];
   for (let i = 0; i < knobs.trees; i++) {
     const spot = pickSpot(4.2);
     trees.push({ ...spot, s: randRange(rng, 0.85, 1.4) });
   }
-  const trampoline = pickSpot(3.2);
-  const mowerSpot = pickSpot(1.6);
-  const mower = { ...mowerSpot, rot: randRange(rng, 0, Math.PI * 2) };
-
-  // second wave of fixtures — recolored duplicates + brand-new backyard gear
-  const pondSpot = pickSpot(5.5);
-  const pond = { ...pondSpot, r: randRange(rng, 2.6, 3.4) };
-  const playground2 = { ...pickSpot(6), rot: randRange(rng, 0, Math.PI * 2) };
   const shed2 = { ...pickSpot(4), rot: randRange(rng, 0, Math.PI * 2) };
   const car2 = { ...pickSpot(3.5), rot: randRange(rng, 0, Math.PI * 2), hue: randRange(rng, 0, 360) };
-  const soccer = { ...pickSpot(5), rot: randRange(rng, 0, Math.PI * 2) };
-  const birdbath = pickSpot(2);
+  const trampoline = pickSpot(3.2);
   const clothesline = { ...pickSpot(3.2), rot: randRange(rng, 0, Math.PI * 2) };
   const veggie = { ...pickSpot(3), rot: randRange(rng, 0, Math.PI * 2) };
   const benches: { x: number; z: number; rot: number }[] = [];
   for (let i = 0; i < knobs.benches; i++) {
     benches.push({ ...pickSpot(2), rot: randRange(rng, 0, Math.PI * 2) });
   }
-  // doghouse tucked against the house, past the door end
-  const doghouse = {
-    x: hInfo.wx + hInfo.nx * 4 + hInfo.tx * (houseLat + 14),
-    z: hInfo.wz + hInfo.nz * 4 + hInfo.tz * (houseLat + 14),
-    rot: Math.atan2(hInfo.nx, hInfo.nz),
-  };
+  const birdbath = pickSpot(2);
+  const mowerSpot = pickSpot(1.6);
+  const mower = { ...mowerSpot, rot: randRange(rng, 0, Math.PI * 2) };
   const clouds: { x: number; y: number; z: number; s: number }[] = [];
   for (let i = 0; i < knobs.clouds; i++) {
     clouds.push({
@@ -500,6 +515,9 @@ export function generateWorld(seed: number, stage = 0): World {
       if (!placementValid(world, bx, bz)) continue;
       const bushR = 0.55 * br;
       const bushX = bx - br * 0.25; // the solid shrub sits off-center in the bed
+      // deck sofas sit up to 0.65m inside the deck edge and aren't zones —
+      // keep the whole bush off the deck rect so it can never reach them
+      if (insideRect(world.deck, bushX, bz, bushR + 0.2)) continue;
       if (!world.zones.every((zo) => Math.hypot(bushX - zo.x, bz - zo.z) >= zo.r + bushR)) continue;
       if (!world.hedges.every((hg) => Math.hypot(bushX - hg.x, bz - hg.z) >= 0.5 * hg.s + bushR + 0.2)) continue;
       if (!world.beds.every((b2) => Math.hypot(bx - b2.x, bz - b2.z) >= br + b2.r + 0.3)) continue;
@@ -561,18 +579,59 @@ export function generateWorld(seed: number, stage = 0): World {
     ...world.beds.map((b) => ({ x: b.x - b.r * 0.25, z: b.z, r: 0.55 * b.r, h: 0 })),
   ];
 
+  // NPC-reachability grid: BFS over walkable 0.5m cells from the NPC (the
+  // same sweep worldcheck asserts with). Hedge rings + fixtures can fence in
+  // a corner — a spawn must never live in such a pocket.
+  const RCELL = 0.5;
+  const RN = Math.floor(MAP_SIZE / RCELL);
+  const rcell = (v: number): number => Math.min(RN - 1, Math.max(0, Math.floor((v + HALF) / RCELL)));
+  const seen = new Uint8Array(RN * RN);
+  const reach = new Uint8Array(RN * RN);
+  {
+    const queue: number[] = [rcell(npc.z) * RN + rcell(npc.x)];
+    seen[queue[0]] = 1;
+    reach[queue[0]] = 1;
+    while (queue.length) {
+      const idx = queue.pop()!;
+      const cx = idx % RN;
+      const cz = (idx - cx) / RN;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= RN || nz >= RN) continue;
+        const nIdx = nz * RN + nx;
+        if (seen[nIdx]) continue;
+        seen[nIdx] = 1;
+        const wx = -HALF + (nx + 0.5) * RCELL;
+        const wz = -HALF + (nz + 0.5) * RCELL;
+        if (Math.abs(wx) > HALF - 1 || Math.abs(wz) > HALF - 1) continue;
+        if (blockedAt(world, wx, wz)) continue;
+        reach[nIdx] = 1;
+        queue.push(nIdx);
+      }
+    }
+  }
+
   // Spawn safety: with the full collider set known, no spawn point may sit
-  // inside (or touching) anything unpassable — relocate to the nearest clear
-  // spot if generation ever crowds one.
-  for (const sp of world.spawnPoints) {
-    if (!blockedAt(world, sp.x, sp.z, 0.3)) continue;
+  // inside (or touching) anything unpassable, within SPAWN_MIN_GAP of another
+  // spawn (yard clamping and relocation can both pinch neighbours), or in a
+  // pocket that can't reach the NPC — relocate to the nearest good spot.
+  for (let si = 0; si < world.spawnPoints.length; si++) {
+    const sp = world.spawnPoints[si];
+    const crowded = (x: number, z: number): boolean =>
+      world.spawnPoints.some(
+        (o, oi) => oi !== si && Math.hypot(x - o.x, z - o.z) < SPAWN_MIN_GAP,
+      );
+    const good = (x: number, z: number): boolean =>
+      !blockedAt(world, x, z, 0.3) && !crowded(x, z) && reach[rcell(z) * RN + rcell(x)] === 1;
+    if (good(sp.x, sp.z)) continue;
     let moved = false;
     for (let r = 0.8; r <= 14 && !moved; r += 0.8) {
       for (let i = 0; i < 16; i++) {
         const a = (i / 16) * Math.PI * 2;
         const nx = clampToYard(sp.x + Math.cos(a) * r);
         const nz = clampToYard(sp.z + Math.sin(a) * r);
-        if (!blockedAt(world, nx, nz, 0.3)) {
+        if (good(nx, nz)) {
           sp.x = nx;
           sp.z = nz;
           moved = true;

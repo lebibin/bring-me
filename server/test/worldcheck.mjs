@@ -59,6 +59,19 @@ for (let s = 1; s <= SEEDS; s++) {
         }
       }
     }
+    // spawns must stay pairwise distinct — yard clamping near corners could
+    // pinch ring neighbours together (players born inside each other)
+    for (let i = 0; i < w.spawnPoints.length; i++) {
+      for (let j = i + 1; j < w.spawnPoints.length; j++) {
+        const a = w.spawnPoints[i];
+        const b = w.spawnPoints[j];
+        const d = Math.hypot(a.x - b.x, a.z - b.z);
+        if (d < 1) {
+          console.error(`FAIL ${tag}: spawns ${i} and ${j} only ${d.toFixed(2)}m apart`);
+          failures++;
+        }
+      }
+    }
     const region = reachable(w, w.npc.x, w.npc.z);
     for (let i = 0; i < w.spawnPoints.length; i++) {
       const sp = w.spawnPoints[i];

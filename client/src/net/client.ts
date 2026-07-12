@@ -27,6 +27,7 @@ import { RoomSocket } from "./socket.ts";
 import { initSlapSounds, playSlapSound, playSound } from "../audio.ts";
 import { CreatePanel } from "../ui/createPanel.ts";
 import { setPing, setScores, setStunCooldown, toast, toastLogo } from "../ui/hud.ts";
+import { storageGet, storageSet } from "../storage.ts";
 import type { LobbyUI } from "../ui/lobby.ts";
 
 const HUE_KEY = "bringme.playerHue";
@@ -39,6 +40,8 @@ export class NetClient {
   scores: Record<number, number> = {};
   /** cumulative points across every game this room has finished */
   totals: RoomTotals = {};
+  /** server truth from welcome — this room is listed on the public browser */
+  private roomPublic = false;
   private socket: RoomSocket | null = null;
   private posTimer: number | null = null;
   private stunCdUntil = 0;
@@ -65,6 +68,8 @@ export class NetClient {
     private readonly name: string,
     private readonly ui: LobbyUI,
     private readonly onGameReady: (game: Game) => void,
+    /** creator asked for a public room; only a brand-new room honors it */
+    private readonly pub: boolean = false,
   ) {}
 
   connect(): void {
@@ -81,6 +86,7 @@ export class NetClient {
           name: this.name,
           v: PROTOCOL_VERSION,
           ...(this.resume ? { resume: this.resume } : {}),
+          ...(this.pub ? { pub: true } : {}),
         });
       },
       onMsg: (m) => this.onMsg(m),
@@ -201,14 +207,14 @@ export class NetClient {
   myHue(): number {
     const me = this.players.find((p) => p.id === this.myId);
     if (me) return me.hue;
-    const saved = Number(localStorage.getItem(HUE_KEY));
+    const saved = Number(storageGet(HUE_KEY));
     return Number.isFinite(saved) ? ((Math.round(saved) % 360) + 360) % 360 : (this.myId * 67) % 360;
   }
 
   /** Recolor own blob instantly; the wire send is throttled while the slider drags. */
   hueAction(hue: number): void {
     hue = ((Math.round(hue) % 360) + 360) % 360;
-    localStorage.setItem(HUE_KEY, String(hue));
+    storageSet(HUE_KEY, String(hue));
     this.game?.setPlayerHue(this.myId, hue);
     const me = this.players.find((p) => p.id === this.myId);
     if (me) me.hue = hue;
@@ -239,6 +245,7 @@ export class NetClient {
         this.serverPhase = m.phase;
         this.scores = m.scores;
         this.totals = m.totals;
+        this.roomPublic = m.isPublic === true;
         this.saveResume(m.resume);
         if (this.game) {
           this.game.setStage(m.settings.stage ?? 0);
@@ -251,7 +258,7 @@ export class NetClient {
           if (this.serverPhase !== "LOBBY") {
             this.enterLivePhase();
           } else {
-            this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals);
+            this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals, this.roomPublic);
           }
           this.sendPing();
           break;
@@ -269,11 +276,11 @@ export class NetClient {
           () => this.myHue(),
         );
         // restore the saved color preference from a previous session
-        const savedHue = localStorage.getItem(HUE_KEY);
+        const savedHue = storageGet(HUE_KEY);
         if (savedHue !== null && Number.isFinite(Number(savedHue)) && Number(savedHue) !== this.myHue()) {
           this.hueAction(Number(savedHue));
         }
-        this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals);
+        this.ui.showRoom(this.code, this.players, this.isHost(), m.settings, this.totals, this.roomPublic);
         this.onGameReady(game);
         initSlapSounds(); // start preloading before the first stun lands
         if (this.serverPhase !== "LOBBY") this.enterLivePhase();
@@ -322,7 +329,7 @@ export class NetClient {
           this.panel?.hide();
         }
         if (m.name === "LOBBY") {
-          this.ui.showRoom(this.code, this.players, this.isHost(), this.ui.readSettings(), this.totals);
+          this.ui.showRoom(this.code, this.players, this.isHost(), this.ui.readSettings(), this.totals, this.roomPublic);
           setStunCooldown(null);
         } else {
           this.ui.hide();

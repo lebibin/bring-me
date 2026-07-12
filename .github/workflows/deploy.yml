@@ -1,6 +1,8 @@
 # CI for Bring Me — check + test on every push, deploy to Cloudflare on main,
-# GitHub Release on v* tags. Needs two repo secrets (see DEPLOY.md):
-#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+# GitHub Release + itch.io channel on v* tags. Secrets (see DEPLOY.md):
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, BUTLER_API_KEY
+# Repo variables: PROD_HOST (e.g. bringme.acct.workers.dev), ITCH_TARGET
+# (e.g. bibinqyoo/bring-me).
 name: deploy
 
 on:
@@ -8,6 +10,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch: # ad-hoc itch push against the already-deployed Worker
 
 jobs:
   check:
@@ -64,3 +67,40 @@ jobs:
         with:
           generate_release_notes: true
           files: bringme-client-*.zip
+
+  # itch.io channel: rides release tags (after the Worker deploy, so the
+  # server the build expects is live) or a manual dispatch. The itch build is
+  # cross-origin — it bakes in the production Worker for sockets and the
+  # canonical URL for invite links (see DEPLOY.md "itch.io channel").
+  itch:
+    needs: deploy
+    if: >-
+      always() &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
+      (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build itch variant (relative base, cross-origin server baked in)
+        run: npm run build:itch -w @bringme/client
+        env:
+          VITE_WS_URL: wss://${{ vars.PROD_HOST }}
+          VITE_INVITE_URL: https://${{ vars.PROD_HOST }}/
+      - name: Install butler
+        run: |
+          curl -fsSL -o butler.zip "https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default"
+          unzip -q butler.zip -d butler-bin
+          chmod +x butler-bin/butler
+          butler-bin/butler -V
+      - name: Push to itch.io (html5 channel)
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = "tag" ] || VER="manual-${GITHUB_RUN_NUMBER}"
+          butler-bin/butler push client/dist-itch "${{ vars.ITCH_TARGET }}:html5" --userversion "$VER"

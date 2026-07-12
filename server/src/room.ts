@@ -24,6 +24,8 @@ import {
   PLAYER_SPEED,
   PROP_REST_Y,
   PROTOCOL_VERSION,
+  REGISTRY_REFRESH_MS,
+  RESUME_TOKENS_MAX,
   ROUND_SECS_DEFAULT,
   ROUND_SECS_MAX,
   ROUND_SECS_MIN,
@@ -79,6 +81,8 @@ import {
   type RulePlayer,
   type RuleTarget,
 } from "./rules.ts";
+import { newBucket, takeToken, type Bucket } from "./bucket.ts";
+import type { Env } from "./env.ts";
 
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000;
 const HALF = MAP_SIZE / 2;
@@ -132,6 +136,10 @@ interface Persisted {
   totals: RoomTotals;
   /** resume token -> the player it reclaims; lets a dropped socket rejoin as itself */
   resumeTokens: Record<string, { id: number; name: string }>;
+  /** listed on the public lobby browser; decided by the creator's first hello */
+  isPublic?: boolean;
+  /** own room code, learned from the Worker's X-Room-Code (not derivable from the DO id) */
+  code?: string;
 }
 
 export class BringMeRoom {
@@ -154,8 +162,19 @@ export class BringMeRoom {
   private readonly dyn = new Map<number, DynProp>();
   private tickHandle: number | null = null;
   private worldCache: World | null = null;
+  private isPublic = false;
+  private code = "";
+  /** last row pushed to the registry — skip no-op upserts (phase churn) */
+  private lastPublished: { hostName: string; players: number; status: string } | null = null;
+  /** next heartbeat republish (keeps lastSeen fresh while idle in a lobby); volatile */
+  private registryRefreshAt = 0;
+  /** per-socket inbound rate limiting; volatile (buckets refill anyway) */
+  private readonly buckets = new Map<WebSocket, Bucket>();
 
-  constructor(private readonly state: DurableObjectState) {
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: Env,
+  ) {
     // keepalive: the edge/NATs kill idle WebSockets (lobbies send nothing for
     // minutes) — answer pings in the runtime without ever waking the DO
     this.state.setWebSocketAutoResponse(
@@ -171,6 +190,8 @@ export class BringMeRoom {
         this.ttlAt = stored.ttlAt;
         this.totals = stored.totals ?? {};
         this.resumeTokens = stored.resumeTokens ?? {};
+        this.isPublic = stored.isPublic ?? false;
+        this.code = stored.code ?? "";
       }
       this.match = (await this.state.storage.get<MatchState>("match")) ?? null;
       for (const ws of this.state.getWebSockets()) {
@@ -186,6 +207,9 @@ export class BringMeRoom {
         this.initDyn();
       }
       if (this.phase() !== "LOBBY" && this.sockets.size > 0) this.ensureTick();
+      // registryRefreshAt is volatile: any wake of an occupied public room
+      // re-registers (self-healing) and re-arms the heartbeat chain
+      if (this.isPublic && this.sockets.size > 0) this.publishRegistry(true);
     });
   }
 
@@ -201,9 +225,18 @@ export class BringMeRoom {
   }
 
   async fetch(request: Request): Promise<Response> {
+    // browse-screen latency probe — answered without arming the TTL so
+    // probes never resurrect or extend a room
+    if (new URL(request.url).pathname.endsWith("/ping")) {
+      return new Response(null, { status: 204 });
+    }
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
     }
+    // the Worker overwrites X-Room-Code on every upgrade forward, so a
+    // client can't forge it; the code isn't derivable from our own DO id
+    const code = request.headers.get("X-Room-Code") ?? "";
+    if (this.code === "" && /^[A-Z0-9]{1,12}$/.test(code)) this.code = code;
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
@@ -217,6 +250,17 @@ export class BringMeRoom {
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
     if (typeof raw !== "string" || raw.length > 4096) return;
+    const now = Date.now();
+    let bucket = this.buckets.get(ws);
+    if (!bucket) {
+      bucket = newBucket(now);
+      this.buckets.set(ws, bucket);
+    }
+    const verdict = takeToken(bucket, now);
+    if (verdict !== "ok") {
+      if (verdict === "close") ws.close(1008, "rate limit");
+      return;
+    }
     const msg = decodeC2S(raw);
     if (!msg) return;
     // normally answered by the auto-response pair without reaching us
@@ -296,12 +340,18 @@ export class BringMeRoom {
       this.sockets.clear();
       this.players.clear();
       this.stopTick();
+      this.deregisterRegistry();
       await this.state.storage.deleteAll();
       return;
     }
     const m = this.match;
     if (m && m.phaseEndsAt > 0 && now >= m.phaseEndsAt - 50) {
       this.onPhaseDeadline(now);
+    }
+    // heartbeat: keep the registry's lastSeen fresh while players idle in a
+    // lobby (no membership/status events for minutes on end)
+    if (this.registryRefreshAt > 0 && now >= this.registryRefreshAt - 50) {
+      this.publishRegistry(true);
     }
     await this.scheduleAlarm();
   }
@@ -340,10 +390,18 @@ export class BringMeRoom {
         this.sockets.delete(id);
       }
     } else {
+      // a brand-new room's creator decides its visibility, once
+      if (this.hostId === 0 && this.nextId === 1) this.isPublic = msg.pub === true;
       name = String(msg.name).trim().slice(0, 16) || "slop";
       id = this.nextId++;
       token = crypto.randomUUID();
       this.resumeTokens[token] = { id, name };
+      // FIFO cap (Records keep insertion order) — a token from 64 joins ago
+      // rejoining as a fresh player beats unbounded storage growth
+      const keys = Object.keys(this.resumeTokens);
+      for (let i = 0; i < keys.length - RESUME_TOKENS_MAX; i++) {
+        delete this.resumeTokens[keys[i]];
+      }
     }
     if (this.hostId === 0) this.hostId = id;
     if (this.seed === 0) this.seed = (Math.random() * 0xffffffff) >>> 0;
@@ -364,6 +422,7 @@ export class BringMeRoom {
       scores: this.match?.scores ?? {},
       totals: this.totals,
       resume: token,
+      isPublic: this.isPublic,
     });
     // Late joiners still need every placed object to render the world.
     if (this.match) {
@@ -377,9 +436,11 @@ export class BringMeRoom {
     this.broadcast({ type: "playerJoined", player: this.info(this.players.get(id)!) }, id);
     this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
     if (this.phase() !== "LOBBY") this.ensureTick();
+    this.publishRegistry();
   }
 
   private dropSocket(ws: WebSocket): void {
+    this.buckets.delete(ws);
     const att = ws.deserializeAttachment() as Attachment | null;
     if (!att) return;
     if (this.sockets.get(att.playerId) !== ws) return;
@@ -404,7 +465,12 @@ export class BringMeRoom {
     }
     this.broadcast({ type: "playerLeft", playerId: att.playerId });
     this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
-    if (this.sockets.size === 0) this.stopTick();
+    if (this.sockets.size === 0) {
+      this.stopTick();
+      this.deregisterRegistry(); // empty rooms don't belong on the browser
+    } else {
+      this.publishRegistry();
+    }
   }
 
   // ---------- lobby / create ----------
@@ -439,6 +505,7 @@ export class BringMeRoom {
     this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
     this.broadcast({ type: "phase", name: "CREATE", endsAt: this.match.phaseEndsAt });
     this.ensureTick();
+    this.publishRegistry(); // lobby -> match on the browse screen
     await this.scheduleAlarm();
   }
 
@@ -570,6 +637,8 @@ export class BringMeRoom {
         break;
     }
     this.persistMatch();
+    // no-op except on the match-end -> LOBBY transition (skip-if-unchanged)
+    this.publishRegistry();
   }
 
   private announceRoundPhase(): void {
@@ -915,6 +984,7 @@ export class BringMeRoom {
   private async scheduleAlarm(): Promise<void> {
     const candidates = [this.ttlAt];
     if (this.match && this.match.phaseEndsAt > 0) candidates.push(this.match.phaseEndsAt);
+    if (this.registryRefreshAt > 0) candidates.push(this.registryRefreshAt);
     const next = Math.min(...candidates.filter((t) => t > 0));
     if (Number.isFinite(next)) await this.state.storage.setAlarm(next);
   }
@@ -964,8 +1034,56 @@ export class BringMeRoom {
       ttlAt: this.ttlAt,
       totals: this.totals,
       resumeTokens: this.resumeTokens,
+      isPublic: this.isPublic,
+      code: this.code,
     };
     void this.state.storage.put("room", data);
+  }
+
+  // ---------- public-lobby registry ----------
+
+  private registry(): { fetch: (url: string, init?: RequestInit) => Promise<Response> } {
+    return this.env.LOBBY.get(this.env.LOBBY.idFromName("lobby"));
+  }
+
+  /**
+   * Push this room's row to the lobby registry. Fire-and-forget: the browse
+   * list is best-effort and must never stall or fail game traffic. `force`
+   * bypasses skip-if-unchanged for the heartbeat (its point is `lastSeen`).
+   */
+  private publishRegistry(force = false): void {
+    if (!this.isPublic || this.code === "") return;
+    // an abandoned room's alarm chain (phase deadlines, heartbeat) must never
+    // re-list it — empty means deregistered, whatever the caller
+    if (this.players.size === 0) {
+      this.deregisterRegistry();
+      return;
+    }
+    const row = {
+      code: this.code,
+      hostName: this.players.get(this.hostId)?.name ?? "",
+      players: this.players.size,
+      status: this.phase() === "LOBBY" ? "lobby" : "match",
+    };
+    const last = this.lastPublished;
+    if (!force && last && last.hostName === row.hostName && last.players === row.players && last.status === row.status) {
+      return;
+    }
+    this.lastPublished = { hostName: row.hostName, players: row.players, status: row.status };
+    this.registryRefreshAt = this.players.size > 0 ? Date.now() + REGISTRY_REFRESH_MS : 0;
+    void this.scheduleAlarm();
+    void this.registry()
+      .fetch("https://registry/upsert", { method: "POST", body: JSON.stringify(row) })
+      .catch(() => {});
+  }
+
+  private deregisterRegistry(): void {
+    if (!this.isPublic || this.code === "") return;
+    this.lastPublished = null;
+    this.registryRefreshAt = 0;
+    void this.registry()
+      .fetch("https://registry/remove", { method: "POST", body: JSON.stringify({ code: this.code }) })
+      .catch(() => {});
   }
 
   private persistMatch(): void {

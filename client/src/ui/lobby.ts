@@ -4,18 +4,26 @@ import {
   CREATE_SECS_DEFAULT,
   CREATE_SECS_MAX,
   CREATE_SECS_MIN,
+  LOBBY_POLL_MS,
+  MAX_PLAYERS,
   ROUND_SECS_DEFAULT,
   ROUND_SECS_MAX,
   ROUND_SECS_MIN,
   STAGES,
   clampStage,
+  type LobbyRoomEntry,
   type MatchSettings,
   type PlayerInfo,
   type RoomTotals,
 } from "@bringme/shared";
+import { fetchLobbyList, pingRoom } from "../net/lobbyApi.ts";
+import { storageGet, storageSet } from "../storage.ts";
 
 export interface LobbyHandlers {
-  onJoin(name: string): void;
+  /** create (or hash-join) — `pub` lists the new room on the public browser */
+  onJoin(name: string, pub: boolean): void;
+  /** join an existing room picked off the browse list */
+  onJoinRoom(code: string, name: string): void;
   onStart(settings: MatchSettings): void;
 }
 
@@ -29,43 +37,123 @@ export class LobbyUI {
   private createInput: HTMLInputElement | null = null;
   private roundInput: HTMLInputElement | null = null;
   private stageVal = 0;
+  // browse-panel state; the poll runs only while the panel is open
+  private browseTimer = 0;
+  private rooms: LobbyRoomEntry[] = [];
+  private readonly latencies = new Map<string, number>();
+  private readonly pinged = new Set<string>();
 
   constructor(private readonly handlers: LobbyHandlers) {
     this.root = document.getElementById("lobby") as HTMLDivElement;
   }
 
   showLanding(code: string | null): void {
-    const saved = localStorage.getItem(NAME_KEY) ?? "";
+    const saved = storageGet(NAME_KEY) ?? "";
     this.root.style.display = "flex";
     this.root.innerHTML = `
       <div class="panel">
-        <img class="wordmark" src="/logo.png" alt="BRING ME!" />
+        <img class="wordmark" src="logo.png" alt="BRING ME!" />
         <p class="sub">hide your item then find them<br />faster than your friends do!</p>
         ${code ? `<p class="sub">joining room <b>${code}</b></p>` : ""}
-        <input id="lb-name" maxlength="16" placeholder="your name" value="${saved}" />
-        <button id="lb-go">${code ? "Join room" : "Create room"}</button>
+        <input id="lb-name" maxlength="16" placeholder="your name" value="${escapeHtml(saved)}" />
+        ${code ? "" : `<label class="pubRow"><input id="lb-pub" type="checkbox" /> public room — anyone can join</label>`}
+        <button id="lb-go">${code ? "join room" : "create room"}</button>
+        ${code ? "" : `<button id="lb-browse" class="ghost">browse public rooms</button>
+        <ul class="rooms" id="lb-roomlist" style="display: none"></ul>`}
         <div id="lb-status" class="status"></div>
       </div>`;
     this.status = this.root.querySelector("#lb-status");
     const nameInput = this.root.querySelector<HTMLInputElement>("#lb-name");
+    const readName = (): string => (nameInput?.value ?? "").trim() || "slop";
     const go = (): void => {
-      const name = (nameInput?.value ?? "").trim() || "slop";
-      localStorage.setItem(NAME_KEY, name);
-      this.handlers.onJoin(name);
+      const name = readName();
+      storageSet(NAME_KEY, name);
+      this.stopBrowse();
+      const pub = this.root.querySelector<HTMLInputElement>("#lb-pub")?.checked === true;
+      this.handlers.onJoin(name, pub);
     };
     this.root.querySelector("#lb-go")?.addEventListener("click", go);
     nameInput?.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") go();
     });
+    const browseBtn = this.root.querySelector<HTMLButtonElement>("#lb-browse");
+    const roomList = this.root.querySelector<HTMLUListElement>("#lb-roomlist");
+    browseBtn?.addEventListener("click", () => {
+      if (!roomList) return;
+      const open = roomList.style.display !== "none";
+      roomList.style.display = open ? "none" : "flex";
+      browseBtn.textContent = open ? "browse public rooms" : "hide public rooms";
+      if (open) this.stopBrowse();
+      else this.startBrowse(readName);
+    });
     nameInput?.focus();
   }
 
-  showRoom(code: string, players: PlayerInfo[], isHost: boolean, settings: MatchSettings, totals: RoomTotals = {}): void {
+  // ---------- public-room browser ----------
+
+  private startBrowse(readName: () => string): void {
+    if (this.browseTimer !== 0) return;
+    const refresh = async (): Promise<void> => {
+      this.rooms = await fetchLobbyList();
+      this.renderRooms(readName);
+      for (const r of this.rooms) {
+        if (this.pinged.has(r.code)) continue; // one probe per room per visit
+        this.pinged.add(r.code);
+        void pingRoom(r.code).then((ms) => {
+          this.latencies.set(r.code, ms);
+          this.renderRooms(readName);
+        });
+      }
+    };
+    void refresh();
+    this.browseTimer = window.setInterval(() => void refresh(), LOBBY_POLL_MS);
+  }
+
+  private stopBrowse(): void {
+    if (this.browseTimer === 0) return;
+    clearInterval(this.browseTimer);
+    this.browseTimer = 0;
+  }
+
+  private renderRooms(readName: () => string): void {
+    const list = this.root.querySelector<HTMLUListElement>("#lb-roomlist");
+    if (!list) return;
+    if (this.rooms.length === 0) {
+      list.innerHTML = `<li class="empty">no public rooms right now — create one!</li>`;
+      return;
+    }
+    list.innerHTML = this.rooms
+      .map((r) => {
+        const ms = this.latencies.get(r.code);
+        const lat = ms === undefined ? "…" : ms < 0 ? "?" : `~${Math.round(ms)}ms`;
+        const full = r.players >= MAX_PLAYERS;
+        const meta = `${r.players}/${MAX_PLAYERS} · ${full ? "full" : r.status === "lobby" ? "in lobby" : "in match"} · ${lat}`;
+        return `<li><button class="roomRow" data-code="${escapeHtml(r.code)}" ${full ? "disabled" : ""}>
+          <span class="rhost">${escapeHtml(r.hostName)}'s room</span>
+          <span class="rmeta">${meta}</span>
+        </button></li>`;
+      })
+      .join("");
+    list.querySelectorAll<HTMLButtonElement>(".roomRow").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const roomCode = btn.dataset["code"] ?? "";
+        if (!roomCode) return;
+        const name = readName();
+        storageSet(NAME_KEY, name);
+        this.stopBrowse();
+        this.handlers.onJoinRoom(roomCode, name);
+      });
+    });
+  }
+
+  showRoom(code: string, players: PlayerInfo[], isHost: boolean, settings: MatchSettings, totals: RoomTotals = {}, isPublic = false): void {
+    this.stopBrowse();
     this.root.style.display = "flex";
     this.root.innerHTML = `
       <div class="panelRow">
       <div class="panel">
         <h1>ROOM ${code}</h1>
+        ${isPublic ? `<p class="sub">public room — listed in the room browser</p>` : ""}
         <button id="lb-copy" class="ghost">copy invite link</button>
         <ul id="lb-players"></ul>
         <div class="settings">
@@ -101,7 +189,11 @@ export class LobbyUI {
     const copyBtn = this.root.querySelector<HTMLButtonElement>("#lb-copy");
     let copyTimer = 0;
     copyBtn?.addEventListener("click", () => {
-      const link = `${location.origin}${location.pathname}#/r/${code}`;
+      // itch build: the page URL is itch's CDN iframe — hand out the canonical
+      // web build's URL instead (both builds join the same rooms)
+      const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+      const base = env?.VITE_INVITE_URL || `${location.origin}${location.pathname}`;
+      const link = `${base}#/r/${code}`;
       void navigator.clipboard.writeText(link).then(() => {
         copyBtn.classList.remove("copied");
         void copyBtn.offsetWidth; // restart the pop animation on rapid re-clicks
@@ -150,7 +242,7 @@ export class LobbyUI {
       this.startBtn.textContent = "waiting for players…";
     } else {
       this.startBtn.disabled = !isHost;
-      this.startBtn.textContent = isHost ? "Start" : "waiting for host…";
+      this.startBtn.textContent = isHost ? "start" : "waiting for host…";
     }
   }
 
@@ -167,6 +259,7 @@ export class LobbyUI {
   }
 
   hide(): void {
+    this.stopBrowse(); // never leak the poll into the game
     this.root.style.display = "none";
   }
 

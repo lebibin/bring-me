@@ -19,6 +19,12 @@ export function wsBase(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 }
 
+/** Same host resolution as wsBase, http(s) scheme — for /lobby and ping probes. */
+export function httpBase(): string {
+  // "ws://..." -> "http://...", "wss://..." -> "https://..."
+  return wsBase().replace(/^ws/, "http");
+}
+
 /**
  * Room socket that survives the real internet: any close/error that we did
  * not ask for schedules a redial with jittered exponential backoff (0.8s ->

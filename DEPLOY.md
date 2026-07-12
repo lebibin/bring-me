@@ -70,6 +70,35 @@ push-to-main-ships model:
 Suggested rhythm: push to `main` freely while testing with friends; tag `v0.1.0` when a build
 feels like a keeper.
 
+## itch.io channel
+
+The itch upload is the same client **built differently** — on itch the page is served from
+itch's CDN (`html-classic.itch.zone/.../index.html`: a nested path, cross-origin to the
+Worker), so Option A's same-origin assumptions don't hold there:
+
+- `npm run build:itch -w @bringme/client` → `client/dist-itch` with `--base ./` (relative
+  asset URLs survive itch's nested hosting).
+- `VITE_WS_URL=wss://<prod-host>` is baked in at build time — without it `wsBase()` would
+  target itch's CDN. `/lobby` and the latency pings follow via `httpBase()`.
+- `VITE_INVITE_URL=https://<prod-host>/` makes the copy-invite button hand out the canonical
+  web URL (an itch iframe URL is not a shareable room link). Both builds join the same rooms.
+- The Worker's `ALLOWED_ORIGINS` (wrangler.toml `[env.production.vars]`) admits the itch
+  iframe origins. **Confirm the real Origin in devtools on first upload** and adjust the var
+  if itch's subdomain pattern differs — that's a redeploy, not a code change.
+
+One-time setup: create the itch project (kind = HTML, "this file will be played in the
+browser", viewport ~1280×720, fullscreen button on), generate an API key (itch.io →
+Settings → API keys), then add repo secret `BUTLER_API_KEY` and repo **variables**
+`ITCH_TARGET` (e.g. `bibinqyoo/bring-me`) and `PROD_HOST` (e.g. `bringme.<acct>.workers.dev`).
+
+The `itch` job in deploy.yml pushes `client/dist-itch` to the `html5` channel with butler on
+every `v*` tag (after the Worker deploy) or manually via workflow_dispatch.
+
+**Protocol drift rule**: the Worker redeploys on every main push; the itch client only
+updates on tags. The server closes `PROTOCOL_VERSION` mismatches (`err: version`), so after
+any version bump, tag a release promptly or itch players are locked out until the channel
+catches up. Additive optional fields (like `hello.pub`) don't bump the version and are safe.
+
 ## After it's live
 
 - **Smoke test** the URL from two devices (one off-LAN, e.g. phone on data): create a room,
