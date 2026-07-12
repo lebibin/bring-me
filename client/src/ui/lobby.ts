@@ -39,8 +39,9 @@ export class LobbyUI {
     this.root.style.display = "flex";
     this.root.innerHTML = `
       <div class="panel">
-        <h1>BRING ME</h1>
-        <p class="sub">${code ? `joining room <b>${code}</b>` : "hide it well. find it first."}</p>
+        <img class="wordmark" src="/logo.png" alt="BRING ME!" />
+        <p class="sub">hide your item then find them<br />faster than your friends do!</p>
+        ${code ? `<p class="sub">joining room <b>${code}</b></p>` : ""}
         <input id="lb-name" maxlength="16" placeholder="your name" value="${saved}" />
         <button id="lb-go">${code ? "Join room" : "Create room"}</button>
         <div id="lb-status" class="status"></div>

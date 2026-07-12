@@ -6,6 +6,22 @@ import type { World } from "@bringme/shared";
  * reveal (object name + swatch, with a spinning 3D preview of the target
  * floating in front) / win. Text is drawn on a CanvasTexture.
  */
+// shared wordmark image drawn on the screen instead of "BRING ME" text
+const logoImg = new Image();
+logoImg.src = "/logo.png";
+
+/** Draw the logo centered at (cx, cy) scaled to `width`; text fallback until it loads. */
+function drawWordmark(c: CanvasRenderingContext2D, cx: number, cy: number, width: number): void {
+  if (logoImg.complete && logoImg.naturalWidth > 0) {
+    const h = width * (logoImg.naturalHeight / logoImg.naturalWidth);
+    c.drawImage(logoImg, cx - width / 2, cy - h / 2, width, h);
+  } else {
+    c.fillStyle = "#ffd23f";
+    c.font = `bold ${Math.round(width * 0.19)}px 'Baloo 2', system-ui, sans-serif`;
+    c.fillText("BRING ME!", cx, cy);
+  }
+}
+
 export class Jumbotron {
   readonly group = new THREE.Group();
   private readonly canvas: HTMLCanvasElement;
@@ -53,6 +69,16 @@ export class Jumbotron {
     void document.fonts.ready.then(() => {
       if (this.lastDraw) this.draw(this.lastDraw);
     });
+    // same deal for the wordmark image
+    if (!logoImg.complete) {
+      logoImg.addEventListener(
+        "load",
+        () => {
+          if (this.lastDraw) this.draw(this.lastDraw);
+        },
+        { once: true },
+      );
+    }
   }
 
   private draw(fn: (c: CanvasRenderingContext2D, w: number, h: number) => void): void {
@@ -74,9 +100,7 @@ export class Jumbotron {
     this.lastCountdown = -1;
     this.setPreview(null);
     this.draw((c, w, h) => {
-      c.fillStyle = "#ffd23f";
-      c.font = "bold 72px 'Baloo 2', system-ui, sans-serif";
-      c.fillText("BRING ME", w / 2, h / 2 - 14);
+      drawWordmark(c, w / 2, h / 2 - 24, 310);
       c.fillStyle = "#8892a8";
       c.font = "26px 'Baloo 2', system-ui, sans-serif";
       c.fillText("press T for a practice round", w / 2, h / 2 + 52);
@@ -103,9 +127,7 @@ export class Jumbotron {
     this.lastCountdown = -1;
     this.setPreview(preview);
     this.draw((c, w, h) => {
-      c.fillStyle = "#ffd23f";
-      c.font = "bold 56px 'Baloo 2', system-ui, sans-serif";
-      c.fillText("BRING ME!", w / 2, 44);
+      drawWordmark(c, w / 2, 40, 180);
       const s = h - 90;
       c.drawImage(shot, w / 2 - s / 2, 76, s, s);
     });
@@ -124,8 +146,12 @@ export class Jumbotron {
     if (this.preview) this.previewSlot.remove(this.preview);
     this.preview = obj;
     if (obj) {
-      obj.position.set(0, 0, 0);
       obj.scale.multiplyScalar(1.6);
+      // prop meshes carry a rest-pose baseline offset — re-center on the
+      // bounding box so the hologram floats centered in the slot
+      const bounds = new THREE.Box3().setFromObject(obj);
+      const c = bounds.getCenter(new THREE.Vector3());
+      obj.position.set(-c.x, -c.y, -c.z);
       this.previewSlot.add(obj);
     }
   }

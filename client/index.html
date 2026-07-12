@@ -63,11 +63,12 @@
       #scores .row { display: flex; justify-content: space-between; gap: 24px; line-height: 1.7; }
       #scores .row b { color: var(--accent); }
 
-      /* stun cooldown stacks above the latency meter in the corner column */
+      /* stun cooldown stacks above the latency meter in the corner column —
+         same 68px height as #netInd so the stack keeps a consistent 12px rhythm */
       #cooldown {
         bottom: calc(var(--edge) + 80px); right: var(--edge); background: var(--panel);
         border-radius: 14px; padding: 16px 22px; font-size: 26px; font-weight: 700;
-        display: none;
+        height: 68px; line-height: 36px; display: none;
       }
       #cooldown.ready { color: #7dd87d; }
 
@@ -99,6 +100,46 @@
         transition: border-color 0.12s ease, color 0.12s ease;
       }
       #fsBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+      /* circular help button: bottom-right corner; .raised lifts it above the
+         latency meter + stun cooldown while they're on screen (see setPing);
+         z above the lobby so it works there too */
+      #creditsBtn {
+        position: fixed; bottom: var(--edge); right: var(--edge); z-index: 25;
+        transition: bottom 0.15s ease;
+        width: 52px; height: 52px; border-radius: 50%;
+        background: var(--panel); color: var(--ink); border: 1px solid #333a4d;
+        font-size: 28px; font-weight: 800; font-family: inherit;
+        cursor: pointer; pointer-events: auto; line-height: 1;
+        transition: border-color 0.12s ease, color 0.12s ease;
+      }
+      #creditsBtn:hover { border-color: var(--accent); color: var(--accent); }
+      #creditsBtn.raised { bottom: calc(var(--edge) + 80px); } /* above the latency meter */
+      #creditsBtn.raised2 { bottom: calc(var(--edge) + 160px); } /* above meter (68) + gap (12) + cooldown (68) + gap (12) */
+
+      #credits {
+        position: fixed; inset: 0; z-index: 30;
+        display: none; align-items: center; justify-content: center;
+        background: rgba(10, 12, 18, 0.72); backdrop-filter: blur(4px);
+      }
+      #credits .panel {
+        position: relative; background: #171a24; border: 3px solid var(--accent);
+        border-radius: 28px; padding: 44px 52px; width: min(680px, 94vw);
+        max-height: 86vh; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 18px; text-align: left;
+      }
+      #credits .wordmark { width: min(320px, 70%); align-self: center; }
+      #credits h2 { font-size: 26px; color: var(--accent); margin-top: 8px; }
+      #credits p, #credits li { font-size: 20px; line-height: 1.5; }
+      #credits ul { list-style: disc; padding-left: 26px; }
+      #credits a { color: var(--accent); }
+      #credits .copy { text-align: center; opacity: 0.85; }
+      #creditsClose {
+        position: absolute; top: 16px; right: 20px;
+        background: transparent; color: var(--ink); border: none;
+        font-size: 30px; cursor: pointer; font-family: inherit; line-height: 1;
+      }
+      #creditsClose:hover { color: var(--accent); }
 
       #createPanel {
         bottom: 60px; left: 50%; transform: translateX(-50%);
@@ -150,6 +191,7 @@
         display: flex; flex-direction: column; gap: 24px; text-align: center;
       }
       #lobby h1 { font-size: 52px; letter-spacing: 0.08em; color: var(--accent); }
+      #lobby .wordmark { width: min(440px, 78%); align-self: center; }
       #lobby .sub { font-size: 26px; opacity: 0.8; }
       #lobby input {
         background: #0e1016; color: var(--ink); border: 1px solid #333a4d;
@@ -211,6 +253,29 @@
       <div id="timer"></div>
     </div>
     <button id="fsBtn" title="toggle fullscreen">⛶ fullscreen</button>
+    <button id="creditsBtn" title="copyright & credits">?</button>
+    <div id="credits">
+      <div class="panel">
+        <button id="creditsClose" title="close">✕</button>
+        <img class="wordmark" src="/logo.png" alt="BRING ME!" />
+        <p class="copy">© 2026 BIBINQYOO. All rights reserved.</p>
+        <h2>Credits</h2>
+        <ul>
+          <li>
+            Slap sounds: <a href="https://opengameart.org/content/punch-slap-n-kick" target="_blank" rel="noopener">“Punch, slap, n' kick”</a>
+            by <a href="https://freesound.org/people/CGEffex/sounds/98341/" target="_blank" rel="noopener">CGEffex</a>
+            (adapted by congusbongus) — CC-BY 3.0
+          </li>
+          <li>UI font: “Baloo 2” by Ek Type — SIL Open Font License</li>
+          <li>Logo font: “Titan One” by Rodrigo Fuenzalida — SIL Open Font License</li>
+          <li>
+            Built with <a href="https://threejs.org/" target="_blank" rel="noopener">three.js</a>
+            and <a href="https://bitecs.dev/" target="_blank" rel="noopener">bitECS</a> (MIT License)
+          </li>
+        </ul>
+        <p class="copy">Support us on <a href="https://ko-fi.com/bibinshow" target="_blank" rel="noopener">ko-fi</a></p>
+      </div>
+    </div>
     <div id="toast" class="hud"></div>
     <div id="scores" class="hud"></div>
     <div id="cooldown" class="hud"></div>

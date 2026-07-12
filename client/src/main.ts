@@ -13,6 +13,17 @@ document.getElementById("fsBtn")?.addEventListener("click", () => {
   else void document.documentElement.requestFullscreen();
 });
 
+const creditsEl = document.getElementById("credits");
+document.getElementById("creditsBtn")?.addEventListener("click", () => {
+  if (creditsEl) creditsEl.style.display = "flex";
+});
+document.getElementById("creditsClose")?.addEventListener("click", () => {
+  if (creditsEl) creditsEl.style.display = "none";
+});
+creditsEl?.addEventListener("click", (e) => {
+  if (e.target === creditsEl) creditsEl.style.display = "none";
+});
+
 let loopStarted = false;
 function startLoop(game: Game): void {
   if (loopStarted) return;

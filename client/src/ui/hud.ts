@@ -24,7 +24,8 @@ export function clearAnnounce(): void {
 
 /** Banner variant showing a picture of the target instead of its name. */
 export function announceTarget(shot: HTMLCanvasElement): void {
-  banner.textContent = "BRING ME ";
+  banner.textContent = "";
+  banner.appendChild(wordmark(72));
   shot.style.height = "104px";
   shot.style.width = "104px";
   shot.style.verticalAlign = "middle";
@@ -33,8 +34,29 @@ export function announceTarget(shot: HTMLCanvasElement): void {
   banner.style.display = "block";
 }
 
+/** The logo image, used wherever the game used to shout its own name. */
+function wordmark(heightPx: number): HTMLImageElement {
+  const img = document.createElement("img");
+  img.src = "/logo.png";
+  img.alt = "BRING ME!";
+  img.style.height = `${heightPx}px`;
+  img.style.verticalAlign = "middle";
+  return img;
+}
+
 export function toast(text: string, ms = 2500): void {
   toastEl.textContent = text;
+  toastEl.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastEl.style.display = "none";
+  }, ms);
+}
+
+/** Center toast showing the logo instead of text. */
+export function toastLogo(ms = 2500): void {
+  toastEl.textContent = "";
+  toastEl.appendChild(wordmark(120));
   toastEl.style.display = "block";
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
@@ -78,9 +100,11 @@ export function setScores(rows: { name: string; pts: number; me: boolean }[]): v
 export function setStunCooldown(secondsLeft: number | null): void {
   if (secondsLeft === null) {
     cooldownEl.style.display = "none";
+    layoutCreditsBtn();
     return;
   }
   cooldownEl.style.display = "block";
+  layoutCreditsBtn();
   if (secondsLeft <= 0) {
     cooldownEl.className = "hud ready";
     cooldownEl.textContent = "STUN READY (Q)";
@@ -91,18 +115,29 @@ export function setStunCooldown(secondsLeft: number | null): void {
 }
 
 const netEl = document.getElementById("netInd") as HTMLDivElement;
+const creditsBtnEl = document.getElementById("creditsBtn") as HTMLButtonElement;
 
 /**
  * Signal-bars latency meter: 4 green bars on a snappy link, fewer/warmer as
  * RTT climbs, 0 bars + blink while reconnecting (rtt = -1). null hides it
  * (sandbox / not yet connected).
  */
+/** Stack the "?" button above whichever bottom-right widgets are visible. */
+function layoutCreditsBtn(): void {
+  const net = netEl.style.display !== "none";
+  const cd = cooldownEl.style.display !== "none";
+  creditsBtnEl.classList.toggle("raised", net && !cd);
+  creditsBtnEl.classList.toggle("raised2", net && cd);
+}
+
 export function setPing(rtt: number | null): void {
   if (rtt === null) {
     netEl.style.display = "none";
+    layoutCreditsBtn();
     return;
   }
   netEl.style.display = "flex";
+  layoutCreditsBtn();
   const bars = netEl.querySelectorAll<HTMLSpanElement>(".b");
   const msEl = netEl.querySelector<HTMLSpanElement>(".ms");
   if (!msEl) return;
