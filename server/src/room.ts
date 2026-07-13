@@ -164,6 +164,9 @@ export class BringMeRoom {
   private worldCache: World | null = null;
   private isPublic = false;
   private code = "";
+  /** which Cloudflare colo this DO landed in — diagnostics only; volatile */
+  private colo = "";
+  private coloLearn: Promise<void> | null = null;
   /** last row pushed to the registry — skip no-op upserts (phase churn) */
   private lastPublished: { hostName: string; players: number; status: string } | null = null;
   /** next heartbeat republish (keeps lastSeen fresh while idle in a lobby); volatile */
@@ -224,11 +227,34 @@ export class BringMeRoom {
     return this.worldCache;
   }
 
+  /**
+   * Learn (once per wake) which colo this DO runs in, so the client can show
+   * "room server: XXX" — turns every far-room latency report into a
+   * one-glance diagnosis. The trace subrequest egresses from the DO itself,
+   * so its colo IS the DO's location. Fire-and-forget: by the time the first
+   * `hello` arrives (a client RTT after the upgrade) it has long resolved.
+   */
+  private learnColo(): void {
+    if (this.colo !== "" || this.coloLearn) return;
+    this.coloLearn = fetch("https://cloudflare.com/cdn-cgi/trace")
+      .then((res) => res.text())
+      .then((text) => {
+        this.colo = /^colo=([A-Z]+)$/m.exec(text)?.[1] ?? "";
+      })
+      .catch(() => {
+        this.coloLearn = null; // diagnostics only — retry on the next fetch
+      });
+  }
+
   async fetch(request: Request): Promise<Response> {
+    this.learnColo();
     // browse-screen latency probe — answered without arming the TTL so
     // probes never resurrect or extend a room
     if (new URL(request.url).pathname.endsWith("/ping")) {
-      return new Response(null, { status: 204 });
+      return new Response(null, {
+        status: 204,
+        headers: this.colo ? { "X-Room-Colo": this.colo } : undefined,
+      });
     }
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
@@ -270,8 +296,15 @@ export class BringMeRoom {
     }
     const att = ws.deserializeAttachment() as Attachment | null;
     if (!att) {
-      if (msg.type === "hello") this.onHello(ws, msg);
-      else this.say(ws, { type: "err", code: "bad_input" });
+      if (msg.type === "hello") {
+        // the welcome is colo's only ride — give the (edge-local, ~ms) trace
+        // one capped beat to resolve; a fast hello must never miss it
+        this.learnColo();
+        if (this.colo === "" && this.coloLearn) {
+          await Promise.race([this.coloLearn, new Promise((r) => setTimeout(r, 250))]);
+        }
+        this.onHello(ws, msg);
+      } else this.say(ws, { type: "err", code: "bad_input" });
       return;
     }
     const p = this.players.get(att.playerId);
@@ -423,6 +456,7 @@ export class BringMeRoom {
       totals: this.totals,
       resume: token,
       isPublic: this.isPublic,
+      ...(this.colo ? { colo: this.colo } : {}),
     });
     // Late joiners still need every placed object to render the world.
     if (this.match) {

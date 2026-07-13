@@ -130,6 +130,11 @@ function layoutCreditsBtn(): void {
   creditsBtnEl.classList.toggle("raised2", net && cd);
 }
 
+/** Diagnostics: which Cloudflare colo the room lives in — shown on meter hover. */
+export function setRoomColo(colo: string): void {
+  netEl.title = colo ? `room server: ${colo}` : "";
+}
+
 export function setPing(rtt: number | null): void {
   if (rtt === null) {
     netEl.style.display = "none";

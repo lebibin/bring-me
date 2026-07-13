@@ -62,7 +62,11 @@ export default {
     const m = url.pathname.match(/^\/room\/([A-Z0-9]{1,12})(\/ping)?$/);
     if (!m) return new Response(`bring me room server v${PROTOCOL_VERSION}`, { status: 200 });
 
-    const stub = env.ROOM.get(env.ROOM.idFromName(m[1]));
+    // Hints only apply the first time a DO is created — this pins each room
+    // near whoever touches its code first, instead of wherever Cloudflare's
+    // default placement lands (which has put SEA-created rooms in the US:
+    // ~200 ms pings for everyone in them, forever — DOs never migrate).
+    const stub = env.ROOM.get(env.ROOM.idFromName(m[1]), roomLocation(request));
     if (m[2]) {
       if (!readOk) return new Response("forbidden origin", { status: 403 });
       if (!(await env.LOBBY_LIMITER.limit({ key: ip })).success) {
@@ -82,6 +86,30 @@ export default {
     return stub.fetch(fwd);
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * Durable Object placement hint from the request's geo data. Continent-level
+ * is enough (DO hints are region-coarse anyway); NA splits on longitude since
+ * it spans two hint regions. Undefined (unknown geo / wrangler dev) falls back
+ * to Cloudflare's default placement.
+ */
+function roomLocation(request: Request): DurableObjectNamespaceGetDurableObjectOptions | undefined {
+  const cf = request.cf;
+  if (!cf) return undefined;
+  const hints: Record<string, DurableObjectLocationHint> = {
+    AF: "afr",
+    AS: "apac",
+    EU: "weur",
+    OC: "oc",
+    SA: "sam",
+  };
+  const continent = typeof cf.continent === "string" ? cf.continent : "";
+  let hint = hints[continent];
+  if (continent === "NA") {
+    hint = Number(cf.longitude) < -100 ? "wnam" : "enam";
+  }
+  return hint ? { locationHint: hint } : undefined;
+}
 
 /** Echo the (already-validated) Origin so the itch iframe can fetch cross-origin. */
 function withCors(res: Response, origin: string | null): Response {

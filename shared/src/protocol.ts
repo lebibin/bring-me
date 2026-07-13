@@ -96,6 +96,8 @@ export type S2C =
       resume: string;
       /** room is listed on the public lobby browser */
       isPublic?: boolean;
+      /** Cloudflare colo the room's DO landed in (latency diagnostics; may lag a wake) */
+      colo?: string;
     }
   | { type: "pong" }
   | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings; totals: RoomTotals }

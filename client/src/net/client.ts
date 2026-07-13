@@ -26,7 +26,7 @@ import { Position, Yaw } from "../ecs/components.ts";
 import { RoomSocket } from "./socket.ts";
 import { initSlapSounds, playSlapSound, playSound } from "../audio.ts";
 import { CreatePanel } from "../ui/createPanel.ts";
-import { setPing, setScores, setStunCooldown, toast, toastLogo } from "../ui/hud.ts";
+import { setPing, setRoomColo, setScores, setStunCooldown, toast, toastLogo } from "../ui/hud.ts";
 import { storageGet, storageSet } from "../storage.ts";
 import type { LobbyUI } from "../ui/lobby.ts";
 
@@ -246,6 +246,7 @@ export class NetClient {
         this.scores = m.scores;
         this.totals = m.totals;
         this.roomPublic = m.isPublic === true;
+        if (m.colo) setRoomColo(m.colo);
         this.saveResume(m.resume);
         if (this.game) {
           this.game.setStage(m.settings.stage ?? 0);
