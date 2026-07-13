@@ -314,6 +314,9 @@
         100% { transform: scale(1); }
       }
       #lobby ul { list-style: none; text-align: left; font-size: 28px; line-height: 1.9; min-height: 80px; }
+      /* a full room (up to 10 players) must scroll inside the list, not shove
+         the time/stage settings off-panel */
+      #lobby #lb-players { max-height: 30vh; overflow-y: auto; }
       #lobby .settings { display: flex; gap: 20px; }
       #lobby .settings label { flex: 1; font-size: 22px; opacity: 0.85; text-align: left; }
       #lobby .settings input { margin-top: 8px; }

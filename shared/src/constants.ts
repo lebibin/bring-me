@@ -97,10 +97,12 @@ export const QUICK_TARGET_PLAYERS = 5;
 export const QUICK_BOT_JOIN_MIN_MS = 1500;
 export const QUICK_BOT_JOIN_MAX_MS = 5000;
 // A bot yields its seat this long after a real player arrives (one at a time).
-export const QUICK_BOT_LEAVE_MIN_MS = 2000;
-export const QUICK_BOT_LEAVE_MAX_MS = 6000;
-// Lobby self-start countdown once a quick room has >= MIN_START_PLAYERS.
-export const QUICK_AUTOSTART_MS = 12000;
+// Kept below the auto-start window so a human who joins a full room bumps a bot
+// and gets to play THIS game rather than waiting for the next lobby.
+export const QUICK_BOT_LEAVE_MIN_MS = 1500;
+export const QUICK_BOT_LEAVE_MAX_MS = 3500;
+// Lobby self-start countdown, armed once the quick room's table is full.
+export const QUICK_AUTOSTART_MS = 5000;
 // Snappier presets than the host defaults — "quick" should mean quick.
 export const QUICK_CREATE_SECS = 60;
 export const QUICK_ROUND_SECS = 90;

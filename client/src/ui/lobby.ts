@@ -6,6 +6,7 @@ import {
   CREATE_SECS_MIN,
   LOBBY_POLL_MS,
   MAX_PLAYERS,
+  QUICK_AUTOSTART_MS,
   ROUND_SECS_DEFAULT,
   ROUND_SECS_MAX,
   ROUND_SECS_MIN,
@@ -291,7 +292,12 @@ export class LobbyUI {
     this.autoStartAt = startsAt && startsAt > Date.now() ? startsAt : 0;
     if (this.autoStartAt === 0) return;
     const render = (): void => {
-      const secs = Math.ceil((this.autoStartAt - Date.now()) / 1000);
+      // clamp to the configured window so clock skew can't ever show 6s for a
+      // 5s countdown — it always begins at exactly QUICK_AUTOSTART_MS seconds
+      const secs = Math.min(
+        Math.ceil(QUICK_AUTOSTART_MS / 1000),
+        Math.ceil((this.autoStartAt - Date.now()) / 1000),
+      );
       if (secs <= 0) {
         clearInterval(this.autoStartTimer);
         this.autoStartTimer = 0;

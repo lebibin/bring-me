@@ -1256,12 +1256,16 @@ export class BringMeRoom {
     } else {
       this.botLeaveAt = 0;
     }
-    // Lobby self-start countdown. Hold (push) it while the table is still
-    // filling so a match never begins under-staffed; once full it counts down
-    // uninterrupted, doubling as the join window for real players.
+    // Lobby self-start countdown. Hold it while the table is still filling (no
+    // countdown shown yet), then arm a fresh, clean window once the table is
+    // full (or can't fill further) — so it always begins at exactly the full
+    // QUICK_AUTOSTART_MS, never a leftover partial value.
     const prevStart = this.autoStartAt;
-    if (this.players.size >= MIN_START_PLAYERS && (this.players.size < QUICK_TARGET_PLAYERS || this.autoStartAt === 0)) {
-      this.autoStartAt = now + QUICK_AUTOSTART_MS;
+    const stillFilling = this.players.size < QUICK_TARGET_PLAYERS && this.botJoinAt > 0;
+    if (this.players.size >= MIN_START_PLAYERS && !stillFilling) {
+      if (this.autoStartAt === 0) this.autoStartAt = now + QUICK_AUTOSTART_MS;
+    } else {
+      this.autoStartAt = 0;
     }
     if (this.autoStartAt !== prevStart) this.broadcastLobby();
     void this.scheduleAlarm();

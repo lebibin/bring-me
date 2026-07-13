@@ -66,11 +66,11 @@ const builders: Record<string, (hue: number) => THREE.Group> = {
   },
   boot(hue) {
     const g = new THREE.Group();
-    const shaft = mesh(new RoundedBoxGeometry(0.2, 0.4, 0.22, 2, 0.06), mat(hue));
+    const shaft = mesh(new RoundedBoxGeometry(0.32, 0.4, 0.24, 2, 0.07), mat(hue));
     shaft.position.set(0, 0.05, -0.1);
-    const foot = mesh(new RoundedBoxGeometry(0.2, 0.16, 0.44, 2, 0.055), mat(hue));
+    const foot = mesh(new RoundedBoxGeometry(0.32, 0.16, 0.44, 2, 0.07), mat(hue));
     foot.position.set(0, -0.17, 0.05);
-    const sole = mesh(new RoundedBoxGeometry(0.22, 0.05, 0.46, 2, 0.02), mat(0, 0, 0.25));
+    const sole = mesh(new RoundedBoxGeometry(0.34, 0.05, 0.46, 2, 0.024), mat(0, 0, 0.25));
     sole.position.set(0, -0.27, 0.05);
     g.add(shaft, foot, sole);
     return g;
