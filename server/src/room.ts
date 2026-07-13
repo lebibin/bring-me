@@ -85,6 +85,7 @@ import { newBucket, takeToken, type Bucket } from "./bucket.ts";
 import type { Env } from "./env.ts";
 
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000;
+const HELLO_TIMEOUT_MS = 10_000;
 const HALF = MAP_SIZE / 2;
 // Party-game pragmatism: 2 players is a valid (if degenerate) match; the
 // plan's ≥3 rule matters for fun, not correctness, and 2 keeps testing easy.
@@ -93,6 +94,11 @@ const MIN_START_PLAYERS = 2;
 interface Attachment {
   playerId: number;
   name: string;
+}
+
+/** Pre-hello marker set at accept; replaced by the real Attachment on join. */
+interface PendingAttachment {
+  pendingSince: number;
 }
 
 interface PlayerState extends RulePlayer {
@@ -198,8 +204,8 @@ export class BringMeRoom {
       }
       this.match = (await this.state.storage.get<MatchState>("match")) ?? null;
       for (const ws of this.state.getWebSockets()) {
-        const att = ws.deserializeAttachment() as Attachment | null;
-        if (!att) continue;
+        const att = this.joined(ws);
+        if (!att) continue; // pre-hello socket — the persisted alarm sweeps it
         this.sockets.set(att.playerId, ws);
         this.players.set(att.playerId, this.freshPlayer(att.playerId, att.name));
       }
@@ -218,6 +224,12 @@ export class BringMeRoom {
 
   private phase(): PhaseName {
     return this.match?.phase ?? "LOBBY";
+  }
+
+  /** The joined-player attachment, or null while the socket is still pre-hello. */
+  private joined(ws: WebSocket): Attachment | null {
+    const att = ws.deserializeAttachment() as Attachment | PendingAttachment | null;
+    return att && "playerId" in att ? att : null;
   }
 
   private world(): World {
@@ -259,6 +271,12 @@ export class BringMeRoom {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
     }
+    // Accepted-socket cap: joins are bounded by MAX_PLAYERS, but a socket
+    // that never says hello holds no player slot — without this, idlers
+    // (distributed past the per-IP limit) accumulate unbounded.
+    if (this.state.getWebSockets().length >= MAX_PLAYERS * 2) {
+      return new Response("room busy", { status: 503 });
+    }
     // the Worker overwrites X-Room-Code on every upgrade forward, so a
     // client can't forge it; the code isn't derivable from our own DO id
     const code = request.headers.get("X-Room-Code") ?? "";
@@ -266,11 +284,15 @@ export class BringMeRoom {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
+    // Stamp the accept time so the alarm chain can evict sockets that never
+    // complete the hello handshake (a setTimeout would die with this request
+    // context AND with hibernation; attachments + alarms survive both).
+    server.serializeAttachment({ pendingSince: Date.now() } satisfies PendingAttachment);
     if (this.ttlAt === 0) {
       this.ttlAt = Date.now() + ROOM_TTL_MS;
       this.persist();
-      await this.scheduleAlarm();
     }
+    await this.scheduleAlarm();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -294,7 +316,7 @@ export class BringMeRoom {
       this.say(ws, { type: "pong" });
       return;
     }
-    const att = ws.deserializeAttachment() as Attachment | null;
+    const att = this.joined(ws);
     if (!att) {
       if (msg.type === "hello") {
         // the welcome is colo's only ride — give the (edge-local, ~ms) trace
@@ -317,6 +339,11 @@ export class BringMeRoom {
         this.onPos(p, msg.x, msg.z, msg.yaw, msg.y ?? 0);
         break;
       case "pickObject":
+        // decodeC2S only checks `type` — a params-less frame must not throw
+        if (typeof msg.params !== "object" || msg.params === null) {
+          this.say(ws, { type: "err", code: "bad_input" });
+          break;
+        }
         this.onPick(p, msg.archetype, msg.params.hue, msg.params.scale);
         break;
       case "placeObject":
@@ -386,6 +413,18 @@ export class BringMeRoom {
     if (this.registryRefreshAt > 0 && now >= this.registryRefreshAt - 50) {
       this.publishRegistry(true);
     }
+    // evict sockets that never completed the hello handshake
+    for (const ws of this.state.getWebSockets()) {
+      if (ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
+      const att = ws.deserializeAttachment() as Attachment | PendingAttachment | null;
+      if (att && "pendingSince" in att && now >= att.pendingSince + HELLO_TIMEOUT_MS - 50) {
+        try {
+          ws.close(1008, "no hello");
+        } catch {
+          /* already dead */
+        }
+      }
+    }
     await this.scheduleAlarm();
   }
 
@@ -399,7 +438,12 @@ export class BringMeRoom {
     }
     // A valid resume token reclaims the caller's old seat — same playerId,
     // same scores, still a match participant. Everything else joins fresh.
-    const resumed = msg.resume ? this.resumeTokens[msg.resume] : undefined;
+    // Own-key check: "__proto__"/"constructor" must never resolve through the
+    // prototype chain into a truthy bogus seat.
+    const resumed =
+      msg.resume && Object.prototype.hasOwnProperty.call(this.resumeTokens, msg.resume)
+        ? this.resumeTokens[msg.resume]
+        : undefined;
     if (!resumed && this.players.size >= MAX_PLAYERS) {
       this.say(ws, { type: "err", code: "full" });
       ws.close(1008, "room full");
@@ -463,6 +507,13 @@ export class BringMeRoom {
       for (const [creatorId, prop] of Object.entries(this.match.objects)) {
         this.say(ws, { type: "propAdded", prop, creatorId: Number(creatorId) });
       }
+      // ...and every displaced resting prop (snapshots carry airborne only);
+      // held props reattach via the carrier's snapshot carry field
+      for (const d of this.dyn.values()) {
+        if (d.heldBy === 0 && !d.airborne && d.moved) {
+          this.say(ws, { type: "rested", propId: d.propId, x: q2(d.x), y: q2(d.y), z: q2(d.z) });
+        }
+      }
       if (this.match.phaseEndsAt > 0) {
         this.say(ws, { type: "phase", name: this.phase(), endsAt: this.match.phaseEndsAt });
       }
@@ -475,7 +526,7 @@ export class BringMeRoom {
 
   private dropSocket(ws: WebSocket): void {
     this.buckets.delete(ws);
-    const att = ws.deserializeAttachment() as Attachment | null;
+    const att = this.joined(ws);
     if (!att) return;
     if (this.sockets.get(att.playerId) !== ws) return;
     const p = this.players.get(att.playerId);
@@ -832,7 +883,7 @@ export class BringMeRoom {
       this.sayTo(p.id, { type: "err", code: "stunned" });
       return;
     }
-    if (!Number.isFinite(dirX) || !Number.isFinite(dirZ) || (dirX === 0 && dirZ === 0)) {
+    if (!Number.isFinite(dirX) || !Number.isFinite(dirZ) || !Number.isFinite(power) || (dirX === 0 && dirZ === 0)) {
       this.sayTo(p.id, { type: "err", code: "bad_input" });
       return;
     }
@@ -950,7 +1001,12 @@ export class BringMeRoom {
           d.vx = b.vx;
           d.vy = b.vy;
           d.vz = b.vz;
-          if (b.resting) d.airborne = false;
+          if (b.resting) {
+            d.airborne = false;
+            // landing correction: snapshots stream only airborne props, so
+            // this is the one message that pins the exact final position
+            this.broadcast({ type: "rested", propId: d.propId, x: q2(d.x), y: q2(d.y), z: q2(d.z) });
+          }
         }
         // NPC contact
         if (d.propId === target) {
@@ -986,7 +1042,9 @@ export class BringMeRoom {
     }
     const loose: SnapshotLoose[] = [];
     for (const d of this.dyn.values()) {
-      if (d.heldBy === 0 && (d.moved || d.airborne)) {
+      // airborne only: resting positions ride the dropped/rested broadcasts
+      // (and the join-time replay), not every 15 Hz frame forever
+      if (d.heldBy === 0 && d.airborne) {
         loose.push({ propId: d.propId, x: q2(d.x), y: q2(d.y), z: q2(d.z) });
       }
     }
@@ -1019,6 +1077,13 @@ export class BringMeRoom {
     const candidates = [this.ttlAt];
     if (this.match && this.match.phaseEndsAt > 0) candidates.push(this.match.phaseEndsAt);
     if (this.registryRefreshAt > 0) candidates.push(this.registryRefreshAt);
+    for (const ws of this.state.getWebSockets()) {
+      // a just-swept socket lingers in getWebSockets() until teardown —
+      // skip non-open ones or its stale deadline re-fires the alarm
+      if (ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
+      const att = ws.deserializeAttachment() as Attachment | PendingAttachment | null;
+      if (att && "pendingSince" in att) candidates.push(att.pendingSince + HELLO_TIMEOUT_MS);
+    }
     const next = Math.min(...candidates.filter((t) => t > 0));
     if (Number.isFinite(next)) await this.state.storage.setAlarm(next);
   }

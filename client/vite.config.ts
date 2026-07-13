@@ -9,4 +9,14 @@ export default defineConfig({
     // Workspace package shipped as raw TS source — must not be pre-bundled.
     exclude: ["@bringme/shared"],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // three.js dwarfs the bundle and changes ~never between deploys —
+        // in its own immutable-cached chunk, repeat visitors re-download
+        // only the game code after a deploy
+        manualChunks: { three: ["three"] },
+      },
+    },
+  },
 });

@@ -361,6 +361,9 @@ export class NetClient {
         this.game?.applyThrown(m.propId, m.x, m.y, m.z, m.vx, m.vy, m.vz);
         if (m.byId === this.myId && this.pending?.action === "throw") this.pending = null;
         break;
+      case "rested":
+        this.game?.applyRested(m.propId, m.x, m.y, m.z);
+        break;
       case "stunned":
         this.game?.applyStunned(m.victimId, m.until);
         this.game?.playSlap(m.byId); // no-op for self if the optimistic swing is mid-flight

@@ -120,6 +120,13 @@ export type S2C =
   | { type: "grabbed"; playerId: number; propId: number }
   | { type: "dropped"; propId: number; x: number; z: number; lockUntil: number; lockedFor: number }
   | { type: "thrown"; propId: number; byId: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }
+  /**
+   * A thrown prop came to rest at exactly (x,y,z) — the one authoritative
+   * landing correction. Resting props are NOT streamed in snapshots (only
+   * airborne ones are); this message plus `dropped` carry every final
+   * position, and joins/reconnects get a replay for each displaced prop.
+   */
+  | { type: "rested"; propId: number; x: number; y: number; z: number }
   | { type: "stunned"; victimId: number; byId: number; until: number }
   | { type: "delivered"; byId: number; propId: number; points: number }
   | {

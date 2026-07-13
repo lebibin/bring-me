@@ -23,11 +23,11 @@ export function initSlapSounds(): void {
   }
 }
 
-// Round SFX (public/sfx/*.wav — synthesized, no external assets).
+// Round SFX (public/sfx/*.ogg — synthesized, no external assets).
 const SFX = {
-  countdown: "/sfx/countdown.wav",
-  start: "/sfx/start.wav",
-  win: "/sfx/win.wav",
+  countdown: "/sfx/countdown.ogg",
+  start: "/sfx/start.ogg",
+  win: "/sfx/win.ogg",
 } as const;
 const sfxPool = new Map<keyof typeof SFX, HTMLAudioElement>();
 

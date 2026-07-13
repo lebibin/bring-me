@@ -618,6 +618,21 @@ export class Game {
     Position.z[teid] = z;
   }
 
+  /**
+   * Authoritative landing: unlike applyLoose this overrides a still-airborne
+   * local sim — the server's rest position is final, and snapshots no longer
+   * stream resting props to correct local drift after the fact.
+   */
+  applyRested(propId: number, x: number, y: number, z: number): void {
+    const teid = this.propEidById.get(propId);
+    if (teid === undefined) return;
+    if (hasComponent(world, CarriedBy, teid)) return;
+    if (hasComponent(world, Airborne, teid)) removeComponent(world, Airborne, teid);
+    Position.x[teid] = x;
+    Position.y[teid] = y;
+    Position.z[teid] = z;
+  }
+
   /** Show the target as a rendered picture of the actual object. */
   applyReveal(archetypeIdx: number, hue: number, scale: number): void {
     const shot = snapshotProp(archetypeIdx, hue, scale);
