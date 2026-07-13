@@ -82,6 +82,7 @@ import {
   type RuleTarget,
 } from "./rules.ts";
 import { newBucket, takeToken, type Bucket } from "./bucket.ts";
+import { logError, logInfo, logWarn } from "./log.ts";
 import type { Env } from "./env.ts";
 
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000;
@@ -219,6 +220,11 @@ export class BringMeRoom {
       // registryRefreshAt is volatile: any wake of an occupied public room
       // re-registers (self-healing) and re-arms the heartbeat chain
       if (this.isPublic && this.sockets.size > 0) this.publishRegistry(true);
+      // wake with restored state = a hibernation/eviction cycle happened —
+      // the trail for "the round reset under us" reports (dyn is volatile)
+      if (stored) {
+        logInfo("room_wake", { room: this.code, phase: this.phase(), sockets: this.sockets.size });
+      }
     });
   }
 
@@ -306,7 +312,10 @@ export class BringMeRoom {
     }
     const verdict = takeToken(bucket, now);
     if (verdict !== "ok") {
-      if (verdict === "close") ws.close(1008, "rate limit");
+      if (verdict === "close") {
+        logWarn("ws_rate_limited", { room: this.code, playerId: this.joined(ws)?.playerId });
+        ws.close(1008, "rate limit");
+      }
       return;
     }
     const msg = decodeC2S(raw);
@@ -390,6 +399,7 @@ export class BringMeRoom {
   async alarm(): Promise<void> {
     const now = Date.now();
     if (this.ttlAt > 0 && now >= this.ttlAt) {
+      logInfo("room_expired", { room: this.code, sockets: this.sockets.size });
       for (const ws of this.sockets.values()) {
         try {
           ws.close(1000, "room expired");
@@ -432,6 +442,8 @@ export class BringMeRoom {
 
   private onHello(ws: WebSocket, msg: Extract<C2S, { type: "hello" }>): void {
     if (msg.v !== PROTOCOL_VERSION) {
+      // spikes here after a deploy = players on a stale cached client
+      logWarn("join_rejected", { room: this.code, reason: "version", clientV: msg.v });
       this.say(ws, { type: "err", code: "version" });
       ws.close(1008, "protocol version mismatch");
       return;
@@ -445,6 +457,7 @@ export class BringMeRoom {
         ? this.resumeTokens[msg.resume]
         : undefined;
     if (!resumed && this.players.size >= MAX_PLAYERS) {
+      logWarn("join_rejected", { room: this.code, reason: "full" });
       this.say(ws, { type: "err", code: "full" });
       ws.close(1008, "room full");
       return;
@@ -522,6 +535,14 @@ export class BringMeRoom {
     this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
     if (this.phase() !== "LOBBY") this.ensureTick();
     this.publishRegistry();
+    logInfo("player_joined", {
+      room: this.code,
+      playerId: id,
+      players: this.players.size,
+      resumed: Boolean(resumed),
+      phase: this.phase(),
+      colo: this.colo,
+    });
   }
 
   private dropSocket(ws: WebSocket): void {
@@ -556,6 +577,12 @@ export class BringMeRoom {
     } else {
       this.publishRegistry();
     }
+    logInfo("player_left", {
+      room: this.code,
+      playerId: att.playerId,
+      players: this.players.size,
+      phase: this.phase(),
+    });
   }
 
   // ---------- lobby / create ----------
@@ -592,6 +619,7 @@ export class BringMeRoom {
     this.ensureTick();
     this.publishRegistry(); // lobby -> match on the browse screen
     await this.scheduleAlarm();
+    logInfo("match_started", { room: this.code, players: this.players.size, settings: this.settings });
   }
 
   private onPick(p: PlayerState, archetype: string, hue: number, scale: number): void {
@@ -708,6 +736,7 @@ export class BringMeRoom {
           }
           this.persist();
           this.broadcast({ type: "matchEnd", scores: m.scores, totals: this.totals });
+          logInfo("match_end", { room: this.code, rounds: m.roundOrder.length, scores: m.scores });
           this.match = null;
           this.dyn.clear();
           void this.state.storage.delete("match");
@@ -724,6 +753,9 @@ export class BringMeRoom {
     this.persistMatch();
     // no-op except on the match-end -> LOBBY transition (skip-if-unchanged)
     this.publishRegistry();
+    // one line per transition (a handful per match) — reconstructs the match
+    // timeline when a "the game got stuck" report comes in
+    logInfo("phase_change", { room: this.code, phase: this.phase(), round: this.match?.round });
   }
 
   private announceRoundPhase(): void {
@@ -836,6 +868,12 @@ export class BringMeRoom {
     this.broadcast({ type: "phase", name: "RESOLVE", endsAt: m.phaseEndsAt, round: m.round, totalRounds: m.roundOrder.length });
     this.persistMatch();
     void this.scheduleAlarm();
+    logInfo("round_end", {
+      room: this.code,
+      round: m.round,
+      found: result.found,
+      ...(result.found ? { deliverer } : {}),
+    });
   }
 
   // ---------- seek actions ----------
@@ -1171,9 +1209,14 @@ export class BringMeRoom {
     this.lastPublished = { hostName: row.hostName, players: row.players, status: row.status };
     this.registryRefreshAt = this.players.size > 0 ? Date.now() + REGISTRY_REFRESH_MS : 0;
     void this.scheduleAlarm();
+    // still fire-and-forget, but a failing registry is now visible instead of
+    // silently leaving stale/missing rows on the browse screen
     void this.registry()
       .fetch("https://registry/upsert", { method: "POST", body: JSON.stringify(row) })
-      .catch(() => {});
+      .then((res) => {
+        if (!res.ok) logWarn("registry_upsert_rejected", { room: this.code, status: res.status });
+      })
+      .catch((e: unknown) => logError("registry_upsert_failed", e, { room: this.code }));
   }
 
   private deregisterRegistry(): void {
@@ -1182,7 +1225,7 @@ export class BringMeRoom {
     this.registryRefreshAt = 0;
     void this.registry()
       .fetch("https://registry/remove", { method: "POST", body: JSON.stringify({ code: this.code }) })
-      .catch(() => {});
+      .catch((e: unknown) => logError("registry_remove_failed", e, { room: this.code }));
   }
 
   private persistMatch(): void {

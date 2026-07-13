@@ -17,6 +17,7 @@ import {
   type LobbyListResponse,
   type LobbyRoomEntry,
 } from "@bringme/shared";
+import { logWarn } from "./log.ts";
 
 const CODE_RE = /^[A-Z0-9]{1,12}$/;
 
@@ -76,7 +77,11 @@ export class LobbyRegistry {
     const exists = sql.exec("SELECT 1 FROM rooms WHERE code = ?", code).toArray().length > 0;
     if (!exists) {
       const count = Number(sql.exec("SELECT COUNT(*) AS n FROM rooms").one()["n"]);
-      if (count >= REGISTRY_MAX_ROOMS) return new Response("registry full", { status: 503 });
+      if (count >= REGISTRY_MAX_ROOMS) {
+        // hitting the cap means new public rooms silently stop being listed
+        logWarn("registry_full", { room: code, rows: count });
+        return new Response("registry full", { status: 503 });
+      }
     }
     sql.exec(
       `INSERT INTO rooms (code, host_name, players, status, last_seen) VALUES (?, ?, ?, ?, ?)

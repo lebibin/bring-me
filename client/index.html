@@ -110,15 +110,18 @@
         margin-left: 16px; vertical-align: -4px; border: 1px solid #0008;
       }
 
+      /* alert boxes center their content whatever it is — long delivery
+         lines ("NAME delivered it! +1") wrap centered instead of ragged-left */
       #toast {
         top: 45%; left: 50%; transform: translate(-50%, -50%);
         background: var(--panel); border-radius: 24px; padding: 32px 60px;
         font-size: 56px; font-weight: 800; display: none;
+        max-width: 92vw; text-align: center;
       }
 
       #timer {
         background: var(--panel); border-radius: 14px; padding: 8px 26px;
-        font-size: 32px; font-weight: 700; display: none;
+        font-size: 32px; font-weight: 700; display: none; text-align: center;
       }
 
       #scores {
@@ -134,7 +137,7 @@
       #cooldown {
         bottom: calc(var(--edge) + 80px); right: var(--edge); background: var(--panel);
         border-radius: 14px; padding: 16px 22px; font-size: 26px; font-weight: 700;
-        height: 68px; line-height: 36px; display: none;
+        height: 68px; line-height: 36px; display: none; text-align: center;
       }
       #cooldown.ready { color: #7dd87d; }
 

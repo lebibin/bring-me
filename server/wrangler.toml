@@ -8,6 +8,16 @@ compatibility_date = "2026-06-01"
 ALLOWED_ORIGINS = ""
 ALLOW_NO_ORIGIN = "true"
 
+# Workers Logs: structured console.* output (see src/log.ts) becomes
+# queryable in the dashboard (Workers & Pages -> bringme -> Logs). Traffic is
+# small, so keep every log line (head_sampling_rate 1) — dial down first if
+# volume ever becomes a cost concern.
+[observability]
+enabled = true
+
+[observability.logs]
+head_sampling_rate = 1
+
 # One Durable Object per room code keeps every player in a room on the same
 # instance — the DO is the authoritative game server (adapted from
 # salpakan/infra/signal, upgraded from 2-seat relay to N-seat authority).
@@ -74,6 +84,14 @@ workers_dev = true
 ALLOWED_ORIGINS = "https://html-classic.itch.zone,https://html.itch.zone,*.itch.zone"
 ALLOW_NO_ORIGIN = "false"
 CANONICAL_HOST = "playbringme.com"
+
+# observability is inheritable, but stated explicitly so a future top-level
+# tweak can't silently change what production ships
+[env.production.observability]
+enabled = true
+
+[env.production.observability.logs]
+head_sampling_rate = 1
 
 # "/" runs worker-first so page loads on non-canonical hosts can 301 to the
 # canonical domain; the worker forwards canonical-host loads to this binding.
