@@ -1,6 +1,6 @@
 {
   "name": "bringme",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Bring Me - 3D multiplayer browser party game (Three.js + bitECS + Cloudflare Durable Objects)",
