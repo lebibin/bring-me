@@ -16,7 +16,9 @@ let lastIndex = -1;
 export function initSlapSounds(): void {
   if (pool.length > 0) return;
   for (let i = 1; i <= SLAP_COUNT; i++) {
-    const a = new Audio(`/hits/${i}.ogg`);
+    // relative: JS-built URLs escape Vite's --base rewriting, and the itch
+    // build lives on a nested CDN path where a leading / 404s
+    const a = new Audio(`hits/${i}.ogg`);
     a.preload = "auto";
     a.volume = 0.75;
     pool.push(a);
@@ -24,10 +26,11 @@ export function initSlapSounds(): void {
 }
 
 // Round SFX (public/sfx/*.ogg — synthesized, no external assets).
+// Relative paths for the same itch reason as the slap sounds above.
 const SFX = {
-  countdown: "/sfx/countdown.ogg",
-  start: "/sfx/start.ogg",
-  win: "/sfx/win.ogg",
+  countdown: "sfx/countdown.ogg",
+  start: "sfx/start.ogg",
+  win: "sfx/win.ogg",
 } as const;
 const sfxPool = new Map<keyof typeof SFX, HTMLAudioElement>();
 

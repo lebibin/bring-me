@@ -8,7 +8,9 @@ import type { World } from "@bringme/shared";
  */
 // shared wordmark image drawn on the screen instead of "BRING ME" text
 const logoImg = new Image();
-logoImg.src = "/logo.png";
+// relative (not /logo.png): JS-built URLs escape Vite's --base rewriting,
+// and the itch build lives on a nested CDN path where a leading / 404s
+logoImg.src = "logo.png";
 
 /** Draw the logo centered at (cx, cy) scaled to `width`; text fallback until it loads. */
 function drawWordmark(c: CanvasRenderingContext2D, cx: number, cy: number, width: number): void {

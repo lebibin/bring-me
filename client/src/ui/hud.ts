@@ -37,7 +37,7 @@ export function announceTarget(shot: HTMLCanvasElement): void {
 /** The logo image, used wherever the game used to shout its own name. */
 function wordmark(heightPx: number): HTMLImageElement {
   const img = document.createElement("img");
-  img.src = "/logo.png";
+  img.src = "logo.png"; // relative for the itch build's nested CDN path
   img.alt = "BRING ME!";
   img.style.height = `${heightPx}px`;
   img.style.verticalAlign = "middle";
