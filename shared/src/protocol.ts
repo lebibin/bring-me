@@ -48,8 +48,11 @@ export interface NetProp {
 // ---------- C2S ----------
 
 export type C2S =
-  /** `pub` only honored on the very first hello a brand-new room receives */
-  | { type: "hello"; name: string; v: number; resume?: string; pub?: boolean }
+  /**
+   * `pub`/`quick` only honored on the very first hello a brand-new room
+   * receives. `quick` implies a public room topped up with bots to a full table.
+   */
+  | { type: "hello"; name: string; v: number; resume?: string; pub?: boolean; quick?: boolean }
   /** keepalive + RTT probe; answered by the DO's auto-response without waking it */
   | { type: "ping" }
   | { type: "start"; settings: MatchSettings }
@@ -100,7 +103,14 @@ export type S2C =
       colo?: string;
     }
   | { type: "pong" }
-  | { type: "lobby"; players: PlayerInfo[]; settings: MatchSettings; totals: RoomTotals }
+  | {
+      type: "lobby";
+      players: PlayerInfo[];
+      settings: MatchSettings;
+      totals: RoomTotals;
+      /** quick-room auto-start deadline (server epoch ms); absent = no countdown */
+      startsAt?: number;
+    }
   | {
       type: "phase";
       name: PhaseName;

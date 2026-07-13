@@ -70,6 +70,8 @@ export class NetClient {
     private readonly onGameReady: (game: Game) => void,
     /** creator asked for a public room; only a brand-new room honors it */
     private readonly pub: boolean = false,
+    /** quick game: public + bot-filled + auto-start; only a brand-new room honors it */
+    private readonly quick: boolean = false,
   ) {}
 
   connect(): void {
@@ -87,6 +89,7 @@ export class NetClient {
           v: PROTOCOL_VERSION,
           ...(this.resume ? { resume: this.resume } : {}),
           ...(this.pub ? { pub: true } : {}),
+          ...(this.quick ? { quick: true } : {}),
         });
       },
       onMsg: (m) => this.onMsg(m),
@@ -301,6 +304,7 @@ export class NetClient {
         // the CREATE phase message drops everyone into it
         this.game?.setStage(m.settings.stage ?? 0);
         this.ui.updatePlayers(m.players, this.isHost(), m.settings);
+        this.ui.setAutoStart(m.startsAt); // quick-room countdown (undefined clears)
         for (const p of m.players) if (p.id !== this.myId) this.game?.addRemote(p.id);
         for (const p of m.players) this.game?.setPlayerHue(p.id, p.hue);
         break;

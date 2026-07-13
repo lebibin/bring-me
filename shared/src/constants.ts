@@ -89,6 +89,31 @@ export const COUNTDOWN_MS = 5000;
 export const REVEAL_MS = 3000;
 export const RESOLVE_MS = 5000;
 
+// --- Quick game (one-click public match, topped up with bots) ---
+// The room fills to this many players (humans + bots) and keeps that count
+// until enough real players arrive to replace every bot.
+export const QUICK_TARGET_PLAYERS = 5;
+// Staggered, human-looking bot joins: one bot per alarm, spaced randomly.
+export const QUICK_BOT_JOIN_MIN_MS = 1500;
+export const QUICK_BOT_JOIN_MAX_MS = 5000;
+// A bot yields its seat this long after a real player arrives (one at a time).
+export const QUICK_BOT_LEAVE_MIN_MS = 2000;
+export const QUICK_BOT_LEAVE_MAX_MS = 6000;
+// Lobby self-start countdown once a quick room has >= MIN_START_PLAYERS.
+export const QUICK_AUTOSTART_MS = 12000;
+// Snappier presets than the host defaults — "quick" should mean quick.
+export const QUICK_CREATE_SECS = 60;
+export const QUICK_ROUND_SECS = 90;
+
+// --- Bot AI ---
+export const BOT_DECISION_HZ = 4; // AI re-plans this often; movement is per-tick
+export const BOT_REACT_MIN_MS = 1200; // post-reveal reaction delay (before skill scale)
+export const BOT_REACT_MAX_MS = 4500;
+export const BOT_SKILL_MIN = 0.45; // per-bot competence scalar (speed, aim, reaction)
+export const BOT_SKILL_MAX = 0.9;
+// Distance at which a bot considers throwing instead of walking the last stretch.
+export const BOT_THROW_RANGE = 8;
+
 // --- Public lobby / launch guardrails ---
 export const LOBBY_LIST_MAX = 20; // rooms served by GET /lobby (client pings each)
 export const LOBBY_POLL_MS = 5000; // browse-screen refresh

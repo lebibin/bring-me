@@ -69,12 +69,13 @@ if (location.hash === "#/sandbox") {
   let net: NetClient | null = null;
 
   const ui = new LobbyUI({
-    onJoin: (name, pub) => join(code ?? newCode(), name, pub),
+    onJoin: (name, pub) => join(code ?? newCode(), name, { pub }),
     onJoinRoom: (roomCode, name) => join(roomCode, name),
+    onQuickGame: (name) => join(newCode(), name, { pub: true, quick: true }),
     onStart: (settings) => net?.start(settings),
   });
 
-  function join(roomCode: string, name: string, pub = false): void {
+  function join(roomCode: string, name: string, opts: { pub?: boolean; quick?: boolean } = {}): void {
     if (!location.hash.startsWith("#/r/")) {
       history.replaceState(null, "", `${location.pathname}${location.search}#/r/${roomCode}`);
     }
@@ -90,7 +91,7 @@ if (location.hash === "#/sandbox") {
       });
       installHook(game, net ?? undefined);
       startLoop(game);
-    }, pub);
+    }, opts.pub, opts.quick);
     net.connect();
   }
 

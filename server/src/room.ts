@@ -24,6 +24,14 @@ import {
   PLAYER_SPEED,
   PROP_REST_Y,
   PROTOCOL_VERSION,
+  QUICK_AUTOSTART_MS,
+  QUICK_BOT_JOIN_MAX_MS,
+  QUICK_BOT_JOIN_MIN_MS,
+  QUICK_BOT_LEAVE_MAX_MS,
+  QUICK_BOT_LEAVE_MIN_MS,
+  QUICK_CREATE_SECS,
+  QUICK_ROUND_SECS,
+  QUICK_TARGET_PLAYERS,
   REGISTRY_REFRESH_MS,
   RESUME_TOKENS_MAX,
   ROUND_SECS_DEFAULT,
@@ -46,7 +54,9 @@ import {
   mulberry32,
   placementValid,
   q2,
+  randInt,
   randRange,
+  randomName,
   stepBallistic,
   throwVelocity,
   type Ballistic,
@@ -64,6 +74,7 @@ import {
   advanceRound,
   beginRounds,
   createdPropId,
+  currentCreator,
   currentTarget,
   newMatch,
   placeObject,
@@ -72,6 +83,17 @@ import {
   toSeek,
   type MatchState,
 } from "./match.ts";
+import {
+  FlowField,
+  newBot,
+  stepBot,
+  type ActorView,
+  type BotAction,
+  type BotContext,
+  type BotSelf,
+  type BotState,
+  type TargetView,
+} from "./bots.ts";
 import {
   airborneDelivery,
   canGrab,
@@ -145,6 +167,10 @@ interface Persisted {
   resumeTokens: Record<string, { id: number; name: string }>;
   /** listed on the public lobby browser; decided by the creator's first hello */
   isPublic?: boolean;
+  /** quick game: public + bot-filled + auto-start; decided by the creator's first hello */
+  quick?: boolean;
+  /** bot seats to re-instate on a wake (AI memory is volatile and re-inits) */
+  botSeats?: { id: number; name: string; hue: number }[];
   /** own room code, learned from the Worker's X-Room-Code (not derivable from the DO id) */
   code?: string;
 }
@@ -170,6 +196,20 @@ export class BringMeRoom {
   private tickHandle: number | null = null;
   private worldCache: World | null = null;
   private isPublic = false;
+  /** quick game — public room topped up with bots that yield to real players */
+  private quick = false;
+  /** virtual players with no socket; their AI runs in tick(). Keyed by playerId. */
+  private readonly bots = new Map<number, BotState>();
+  /** next staggered bot join / bot eviction / lobby self-start (epoch ms; 0 = unset) */
+  private botJoinAt = 0;
+  private botLeaveAt = 0;
+  private autoStartAt = 0;
+  /** bot pathfinding fields, cached per world / per round (volatile) */
+  private botNpcField: FlowField | null = null;
+  private botFieldWorld: World | null = null;
+  private botTargetField: FlowField | null = null;
+  private botTargetFieldFor = -1;
+  private botTargetGoal = { x: 0, z: 0 };
   private code = "";
   /** which Cloudflare colo this DO landed in — diagnostics only; volatile */
   private colo = "";
@@ -201,7 +241,16 @@ export class BringMeRoom {
         this.totals = stored.totals ?? {};
         this.resumeTokens = stored.resumeTokens ?? {};
         this.isPublic = stored.isPublic ?? false;
+        this.quick = stored.quick ?? false;
         this.code = stored.code ?? "";
+        // re-seat persisted bots with fresh AI memory (it's volatile; a mid-round
+        // wake just makes each bot re-plan, same recovery class as dyn-prop reset)
+        for (const seat of stored.botSeats ?? []) {
+          this.bots.set(seat.id, newBot((Math.random() * 0xffffffff) >>> 0));
+          const ps = this.freshPlayer(seat.id, seat.name);
+          ps.hue = seat.hue;
+          this.players.set(seat.id, ps);
+        }
       }
       this.match = (await this.state.storage.get<MatchState>("match")) ?? null;
       for (const ws of this.state.getWebSockets()) {
@@ -220,6 +269,9 @@ export class BringMeRoom {
       // registryRefreshAt is volatile: any wake of an occupied public room
       // re-registers (self-healing) and re-arms the heartbeat chain
       if (this.isPublic && this.sockets.size > 0) this.publishRegistry(true);
+      // quick room: rebalance the bot table for the survivors (removes all bots
+      // if no human made it through the wake)
+      if (this.quick) this.reconcileBots(Date.now());
       // wake with restored state = a hibernation/eviction cycle happened —
       // the trail for "the round reset under us" reports (dyn is volatile)
       if (stored) {
@@ -423,6 +475,29 @@ export class BringMeRoom {
     if (this.registryRefreshAt > 0 && now >= this.registryRefreshAt - 50) {
       this.publishRegistry(true);
     }
+    // quick-game bot lifecycle — all lobby-phase, so it must ride the alarm
+    // (an idle LOBBY has no tick to hang it on)
+    if (this.botJoinAt > 0 && now >= this.botJoinAt - 50) {
+      this.botJoinAt = 0;
+      if (this.quick && this.phase() === "LOBBY" && this.sockets.size > 0 && this.players.size < QUICK_TARGET_PLAYERS) {
+        this.addBot();
+      }
+      this.reconcileBots(now); // arm the next staggered join if still short
+    }
+    if (this.botLeaveAt > 0 && now >= this.botLeaveAt - 50) {
+      this.botLeaveAt = 0;
+      if (this.quick && this.phase() === "LOBBY" && this.players.size > QUICK_TARGET_PLAYERS && this.bots.size > 0) {
+        const victim = this.bots.keys().next();
+        if (!victim.done) this.removePlayer(victim.value, true);
+      }
+      this.reconcileBots(now); // keep evicting until the table fits
+    }
+    if (this.autoStartAt > 0 && now >= this.autoStartAt - 50) {
+      this.autoStartAt = 0;
+      if (this.quick && this.phase() === "LOBBY" && this.players.size >= MIN_START_PLAYERS) {
+        this.beginQuickMatch(now);
+      }
+    }
     // evict sockets that never completed the hello handshake
     for (const ws of this.state.getWebSockets()) {
       if (ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
@@ -480,8 +555,12 @@ export class BringMeRoom {
         this.sockets.delete(id);
       }
     } else {
-      // a brand-new room's creator decides its visibility, once
-      if (this.hostId === 0 && this.nextId === 1) this.isPublic = msg.pub === true;
+      // a brand-new room's creator decides its visibility, once. quick games
+      // are always public (they must be joinable off the browser) and add bots.
+      if (this.hostId === 0 && this.nextId === 1) {
+        this.quick = msg.quick === true;
+        this.isPublic = msg.pub === true || this.quick;
+      }
       name = String(msg.name).trim().slice(0, 16) || "slop";
       id = this.nextId++;
       token = crypto.randomUUID();
@@ -532,9 +611,11 @@ export class BringMeRoom {
       }
     }
     this.broadcast({ type: "playerJoined", player: this.info(this.players.get(id)!) }, id);
-    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
+    this.broadcastLobby();
     if (this.phase() !== "LOBBY") this.ensureTick();
     this.publishRegistry();
+    // quick room: a real player just arrived — top up or start yielding seats
+    if (this.quick && !resumed) this.reconcileBots(Date.now());
     logInfo("player_joined", {
       room: this.code,
       playerId: id,
@@ -550,7 +631,19 @@ export class BringMeRoom {
     const att = this.joined(ws);
     if (!att) return;
     if (this.sockets.get(att.playerId) !== ws) return;
-    const p = this.players.get(att.playerId);
+    this.removePlayer(att.playerId, false);
+    // a human came or went — quick rooms may need to drop all bots (last human
+    // left) or rebalance the table on the next return to the lobby
+    if (this.quick) this.reconcileBots(Date.now());
+  }
+
+  /**
+   * Remove one player (human leaver or evicted bot) by id: drop what they held,
+   * clear their seat, migrate the host to a real player, and tear down an empty
+   * room. Shared by the socket-close path and quick-game bot eviction.
+   */
+  private removePlayer(id: number, isBot: boolean): void {
+    const p = this.players.get(id);
     // A leaver holding anything drops it in place.
     const held = p && p.carry >= 0 ? this.dyn.get(p.carry) : undefined;
     if (p && held && held.heldBy === p.id) {
@@ -561,16 +654,24 @@ export class BringMeRoom {
       held.moved = true;
       this.broadcast({ type: "dropped", propId: held.propId, x: q2(p.x), z: q2(p.z), lockUntil: 0, lockedFor: 0 });
     }
-    this.sockets.delete(att.playerId);
-    this.players.delete(att.playerId);
-    this.picks.delete(att.playerId);
-    if (this.hostId === att.playerId) {
-      const next = this.players.keys().next();
-      this.hostId = next.done ? 0 : next.value;
+    this.sockets.delete(id);
+    this.players.delete(id);
+    this.picks.delete(id);
+    if (isBot) this.bots.delete(id);
+    if (this.hostId === id) {
+      // migrate to the next HUMAN — a bot can't press start, and never a host
+      let next = 0;
+      for (const cand of this.players.keys()) {
+        if (this.sockets.has(cand)) {
+          next = cand;
+          break;
+        }
+      }
+      this.hostId = next;
       this.persist();
     }
-    this.broadcast({ type: "playerLeft", playerId: att.playerId });
-    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
+    this.broadcast({ type: "playerLeft", playerId: id });
+    this.broadcastLobby();
     if (this.sockets.size === 0) {
       this.stopTick();
       this.deregisterRegistry(); // empty rooms don't belong on the browser
@@ -579,7 +680,8 @@ export class BringMeRoom {
     }
     logInfo("player_left", {
       room: this.code,
-      playerId: att.playerId,
+      playerId: id,
+      bot: isBot,
       players: this.players.size,
       phase: this.phase(),
     });
@@ -606,20 +708,44 @@ export class BringMeRoom {
       stage: clampStage(raw?.stage),
     };
     const now = Date.now();
+    this.launchMatch(now);
+    await this.scheduleAlarm();
+    logInfo("match_started", { room: this.code, players: this.players.size, settings: this.settings });
+  }
+
+  /** Quick-game lobby self-start: begin a match with the snappy quick presets. */
+  private beginQuickMatch(now: number): void {
+    if (this.phase() !== "LOBBY" || this.players.size < MIN_START_PLAYERS) return;
+    this.settings = { createSecs: QUICK_CREATE_SECS, roundSecs: QUICK_ROUND_SECS, stage: clampStage(this.settings.stage) };
+    this.launchMatch(now);
+    void this.scheduleAlarm();
+    logInfo("quick_match_started", { room: this.code, players: this.players.size });
+  }
+
+  /**
+   * Common match-launch body (host start and quick auto-start): snapshot the
+   * roster into a fresh match, reset carries/picks, stand down any pending bot
+   * lifecycle timers, and broadcast CREATE. `this.settings` must already be set.
+   */
+  private launchMatch(now: number): void {
     this.match = newMatch(this.seed, this.settings, [...this.players.keys()], now);
     this.dyn.clear();
     for (const pl of this.players.values()) pl.carry = -1;
     this.picks.clear();
+    // roster is frozen for the match — stand the bot lifecycle timers down
+    this.autoStartAt = 0;
+    this.botJoinAt = 0;
+    this.botLeaveAt = 0;
+    // fresh AI memory so bots re-plan CREATE hiding for the new match
+    for (const id of this.bots.keys()) this.bots.set(id, newBot((Math.random() * 0xffffffff) >>> 0));
     this.persist();
     this.persistMatch();
     // settings first: clients must learn the (possibly new) stage and rebuild
     // the world BEFORE the CREATE phase drops them into it
-    this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
+    this.broadcastLobby();
     this.broadcast({ type: "phase", name: "CREATE", endsAt: this.match.phaseEndsAt });
     this.ensureTick();
     this.publishRegistry(); // lobby -> match on the browse screen
-    await this.scheduleAlarm();
-    logInfo("match_started", { room: this.code, players: this.players.size, settings: this.settings });
   }
 
   private onPick(p: PlayerState, archetype: string, hue: number, scale: number): void {
@@ -741,7 +867,7 @@ export class BringMeRoom {
           this.dyn.clear();
           void this.state.storage.delete("match");
           this.broadcast({ type: "phase", name: "LOBBY", endsAt: 0 });
-          this.broadcast({ type: "lobby", players: this.roster(), settings: this.settings, totals: this.totals });
+          this.broadcastLobby();
           this.stopTick();
         } else {
           this.announceRoundPhase();
@@ -1025,6 +1151,10 @@ export class BringMeRoom {
     const m = this.match;
     const now = Date.now();
 
+    // bots think first so their moves/actions this tick feed the delivery
+    // checks and the snapshot built below
+    if (this.bots.size > 0 && m) this.stepBots(now);
+
     const target = this.targetId();
     if (m && m.phase === "SEEK") {
       const w = this.world();
@@ -1089,6 +1219,153 @@ export class BringMeRoom {
     this.broadcast({ type: "snapshot", t: now, players, loose, scores: this.match?.scores ?? {} });
   }
 
+  // ---------- quick-game bots ----------
+
+  /**
+   * Keep the quick-room table at QUICK_TARGET_PLAYERS: fill with staggered bot
+   * joins, evict bots one at a time as real players overflow the table, and
+   * drop every bot the moment the last human leaves. All fill/evict happens in
+   * the lobby (roster is frozen mid-match); each transition is armed as an
+   * alarm so an idle, tickless lobby still advances.
+   */
+  private reconcileBots(now: number): void {
+    if (!this.quick) return;
+    const humans = this.sockets.size;
+    // no humans → drop every bot; a bot crew must never keep a room alive/listed
+    if (humans === 0) {
+      for (const id of [...this.bots.keys()]) this.removePlayer(id, true);
+      this.botJoinAt = 0;
+      this.botLeaveAt = 0;
+      this.autoStartAt = 0;
+      return;
+    }
+    // mid-match: roster frozen — rebalance when we return to the lobby
+    if (this.phase() !== "LOBBY") {
+      this.botJoinAt = 0;
+      this.botLeaveAt = 0;
+      return;
+    }
+    const total = this.players.size;
+    if (total < QUICK_TARGET_PLAYERS) {
+      if (this.botJoinAt === 0) this.botJoinAt = now + randInt(Math.random, QUICK_BOT_JOIN_MIN_MS, QUICK_BOT_JOIN_MAX_MS);
+    } else {
+      this.botJoinAt = 0;
+    }
+    if (total > QUICK_TARGET_PLAYERS && this.bots.size > 0) {
+      if (this.botLeaveAt === 0) this.botLeaveAt = now + randInt(Math.random, QUICK_BOT_LEAVE_MIN_MS, QUICK_BOT_LEAVE_MAX_MS);
+    } else {
+      this.botLeaveAt = 0;
+    }
+    // Lobby self-start countdown. Hold (push) it while the table is still
+    // filling so a match never begins under-staffed; once full it counts down
+    // uninterrupted, doubling as the join window for real players.
+    const prevStart = this.autoStartAt;
+    if (this.players.size >= MIN_START_PLAYERS && (this.players.size < QUICK_TARGET_PLAYERS || this.autoStartAt === 0)) {
+      this.autoStartAt = now + QUICK_AUTOSTART_MS;
+    }
+    if (this.autoStartAt !== prevStart) this.broadcastLobby();
+    void this.scheduleAlarm();
+  }
+
+  /** Add one bot: a socket-less player with a human name and fresh AI memory. */
+  private addBot(): void {
+    const taken = new Set<string>();
+    for (const pl of this.players.values()) taken.add(pl.name.toLowerCase());
+    const name = randomName(Math.random, taken);
+    const id = this.nextId++;
+    this.bots.set(id, newBot((Math.random() * 0xffffffff) >>> 0));
+    this.players.set(id, this.freshPlayer(id, name));
+    this.persist();
+    this.broadcast({ type: "playerJoined", player: this.info(this.players.get(id)!) });
+    this.broadcastLobby();
+    this.publishRegistry();
+    logInfo("bot_joined", { room: this.code, botId: id, players: this.players.size });
+  }
+
+  /** Drive every bot one tick: move it, then dispatch at most one action. */
+  private stepBots(now: number): void {
+    const world = this.world();
+    if (this.botFieldWorld !== world) {
+      this.botFieldWorld = world;
+      this.botNpcField = new FlowField(world, world.npc.x, world.npc.z);
+      this.botTargetField = null;
+      this.botTargetFieldFor = -1;
+    }
+    const phase = this.phase();
+    let target: TargetView | null = null;
+    let targetField: FlowField | null = null;
+    if (this.match && phase === "SEEK") {
+      const tid = this.targetId();
+      const d = tid >= 0 ? this.ensureDyn(tid) : null;
+      if (d) {
+        target = { propId: tid, creatorId: currentCreator(this.match), x: d.x, z: d.z, heldBy: d.heldBy, airborne: d.airborne };
+        // (re)build the routing field when the target changes or drifts from its goal
+        if (this.botTargetFieldFor !== tid || Math.hypot(this.botTargetGoal.x - d.x, this.botTargetGoal.z - d.z) > 2) {
+          this.botTargetField = new FlowField(world, d.x, d.z);
+          this.botTargetFieldFor = tid;
+          this.botTargetGoal = { x: d.x, z: d.z };
+        }
+        targetField = this.botTargetField;
+      }
+    }
+    const actors: ActorView[] = [];
+    for (const p of this.players.values()) {
+      actors.push({ id: p.id, x: p.x, z: p.z, carry: p.carry, stunnedUntil: p.stunnedUntil });
+    }
+    const ctx: BotContext = {
+      world,
+      phase,
+      npc: world.npc,
+      npcField: this.botNpcField!,
+      target,
+      targetField,
+      actors,
+      phaseEndsAt: this.match?.phaseEndsAt ?? 0,
+      dt: TICK_MS / 1000,
+    };
+    for (const [id, bot] of this.bots) {
+      const p = this.players.get(id);
+      if (!p) {
+        this.bots.delete(id);
+        continue;
+      }
+      const self: BotSelf = { id: p.id, x: p.x, z: p.z, yaw: p.yaw, carry: p.carry, stunnedUntil: p.stunnedUntil, stunCdUntil: p.stunCdUntil };
+      const step = stepBot(bot, self, ctx, now);
+      if (step.move && now >= p.stunnedUntil) {
+        p.x = step.move.x;
+        p.z = step.move.z;
+        p.yaw = step.move.yaw;
+        p.y = 0;
+        p.lastPosMs = now;
+      }
+      if (step.action) this.dispatchBotAction(p, step.action);
+    }
+  }
+
+  /** Route a bot's decision through the same internal handlers a human hits. */
+  private dispatchBotAction(p: PlayerState, a: BotAction): void {
+    switch (a.kind) {
+      case "pick":
+        this.onPick(p, a.archetype, a.hue, a.scale);
+        break;
+      case "place":
+        this.onPlace(p, a.x, a.z);
+        break;
+      case "grab":
+        this.onGrab(p, a.propId);
+        break;
+      case "drop":
+        this.onDrop(p);
+        break;
+      case "throw":
+        this.onThrow(p, a.dirX, a.dirZ, a.power);
+        break;
+      case "stun":
+        this.onStun(p);
+        break;
+    }
+  }
+
   // ---------- helpers ----------
 
   private ruleTarget(d: DynProp): RuleTarget {
@@ -1115,6 +1392,9 @@ export class BringMeRoom {
     const candidates = [this.ttlAt];
     if (this.match && this.match.phaseEndsAt > 0) candidates.push(this.match.phaseEndsAt);
     if (this.registryRefreshAt > 0) candidates.push(this.registryRefreshAt);
+    if (this.botJoinAt > 0) candidates.push(this.botJoinAt);
+    if (this.botLeaveAt > 0) candidates.push(this.botLeaveAt);
+    if (this.autoStartAt > 0) candidates.push(this.autoStartAt);
     for (const ws of this.state.getWebSockets()) {
       // a just-swept socket lingers in getWebSockets() until teardown —
       // skip non-open ones or its stale deadline re-fires the alarm
@@ -1172,6 +1452,11 @@ export class BringMeRoom {
       totals: this.totals,
       resumeTokens: this.resumeTokens,
       isPublic: this.isPublic,
+      quick: this.quick,
+      botSeats: [...this.bots.keys()].map((id) => {
+        const p = this.players.get(id)!;
+        return { id, name: p.name, hue: p.hue };
+      }),
       code: this.code,
     };
     void this.state.storage.put("room", data);
@@ -1242,6 +1527,17 @@ export class BringMeRoom {
         /* dead socket; close handler cleans up */
       }
     }
+  }
+
+  /** Broadcast the current lobby roster + settings (with a quick-start countdown if armed). */
+  private broadcastLobby(): void {
+    this.broadcast({
+      type: "lobby",
+      players: this.roster(),
+      settings: this.settings,
+      totals: this.totals,
+      ...(this.autoStartAt > 0 ? { startsAt: this.autoStartAt } : {}),
+    });
   }
 
   private sayTo(id: number, msg: S2C): void {

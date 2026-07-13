@@ -11,6 +11,7 @@ import {
   ROUND_SECS_MIN,
   STAGES,
   clampStage,
+  randomName,
   type LobbyRoomEntry,
   type MatchSettings,
   type PlayerInfo,
@@ -24,6 +25,8 @@ export interface LobbyHandlers {
   onJoin(name: string, pub: boolean): void;
   /** join an existing room picked off the browse list */
   onJoinRoom(code: string, name: string): void;
+  /** one-click public game topped up with bots; auto-starts after a countdown */
+  onQuickGame(name: string): void;
   onStart(settings: MatchSettings): void;
 }
 
@@ -42,6 +45,9 @@ export class LobbyUI {
   private rooms: LobbyRoomEntry[] = [];
   private readonly latencies = new Map<string, number>();
   private readonly pinged = new Set<string>();
+  // quick-room auto-start countdown; ticks the status line until the match begins
+  private autoStartTimer = 0;
+  private autoStartAt = 0;
 
   constructor(private readonly handlers: LobbyHandlers) {
     this.root = document.getElementById("lobby") as HTMLDivElement;
@@ -56,8 +62,9 @@ export class LobbyUI {
         <p class="sub">hide your item then find them<br />faster than your friends do!</p>
         ${code ? `<p class="sub">joining room <b>${code}</b></p>` : ""}
         <input id="lb-name" maxlength="16" placeholder="your name" value="${escapeHtml(saved)}" />
+        ${code ? "" : `<button id="lb-quick">⚡ quick game</button>`}
         ${code ? "" : `<label class="pubRow"><input id="lb-pub" type="checkbox" /> public room — anyone can join</label>`}
-        <button id="lb-go">${code ? "join room" : "create room"}</button>
+        <button id="lb-go" ${code ? "" : `class="ghost"`}>${code ? "join room" : "create room"}</button>
         ${code ? "" : `<button id="lb-browse" class="ghost">browse public rooms</button>
         <ul class="rooms" id="lb-roomlist" style="display: none"></ul>`}
         <div id="lb-status" class="status"></div>
@@ -72,6 +79,19 @@ export class LobbyUI {
       const pub = this.root.querySelector<HTMLInputElement>("#lb-pub")?.checked === true;
       this.handlers.onJoin(name, pub);
     };
+    // quick game: name yourself if you haven't, then jump into a bot-filled
+    // public match. A typed or previously-saved name is never overwritten.
+    const quick = (): void => {
+      let name = nameInput?.value.trim() ?? "";
+      if (!name) {
+        name = randomName(Math.random);
+        if (nameInput) nameInput.value = name;
+      }
+      storageSet(NAME_KEY, name);
+      this.stopBrowse();
+      this.handlers.onQuickGame(name);
+    };
+    this.root.querySelector("#lb-quick")?.addEventListener("click", quick);
     this.root.querySelector("#lb-go")?.addEventListener("click", go);
     nameInput?.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") go();
@@ -258,8 +278,34 @@ export class LobbyUI {
     if (this.status) this.status.textContent = text;
   }
 
+  /**
+   * Drive the quick-room self-start countdown on the status line. `startsAt` is
+   * the server's epoch-ms deadline; undefined/past clears it. Re-reads the
+   * status element each tick, so it survives showRoom rebuilds.
+   */
+  setAutoStart(startsAt: number | undefined): void {
+    if (this.autoStartTimer !== 0) {
+      clearInterval(this.autoStartTimer);
+      this.autoStartTimer = 0;
+    }
+    this.autoStartAt = startsAt && startsAt > Date.now() ? startsAt : 0;
+    if (this.autoStartAt === 0) return;
+    const render = (): void => {
+      const secs = Math.ceil((this.autoStartAt - Date.now()) / 1000);
+      if (secs <= 0) {
+        clearInterval(this.autoStartTimer);
+        this.autoStartTimer = 0;
+        return;
+      }
+      this.setStatus(`starting in ${secs}s…`);
+    };
+    render();
+    this.autoStartTimer = window.setInterval(render, 500);
+  }
+
   hide(): void {
     this.stopBrowse(); // never leak the poll into the game
+    this.setAutoStart(undefined); // never leak the countdown into the game
     this.root.style.display = "none";
   }
 

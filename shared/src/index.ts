@@ -1,6 +1,7 @@
 export * from "./constants.ts";
 export * from "./stages.ts";
 export * from "./rng.ts";
+export * from "./names.ts";
 export * from "./catalog.ts";
 export * from "./worldgen.ts";
 export * from "./sim.ts";
