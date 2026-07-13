@@ -15,6 +15,13 @@ export { BringMeRoom, LobbyRegistry };
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Cloudflare answers plain HTTP too unless the zone forces HTTPS — force
+    // it in code so every attached domain behaves identically. Gated on
+    // CANONICAL_HOST (production): wrangler dev and the bots stay on http/ws.
+    if (env.CANONICAL_HOST && url.protocol === "http:") {
+      url.protocol = "https:";
+      return Response.redirect(url.href, 301);
+    }
     const origin = request.headers.get("Origin");
     const originOk = originAllowed(
       origin,
