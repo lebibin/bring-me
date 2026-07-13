@@ -15,7 +15,7 @@ there is no CORS, no baked-in server URL, and no origin allowlist to maintain. T
 `wsBase()` and the server's `originAllowed()` already implement this.
 
 - Deploy: `npm run build -w @bringme/client && cd server && npx wrangler deploy --env production`
-- URL: `https://bringme.<account>.workers.dev`, upgradeable to `bringme.bibin.dev` later
+- URL: `https://playbringme.com` (canonical; workers.dev + `bringme.bibin.dev` 301 to it)
 - Config lives in `server/wrangler.toml` under `[env.production]` (kept out of the default env
   so local `wrangler dev` never needs `client/dist` to exist)
 
@@ -89,7 +89,7 @@ Worker), so Option A's same-origin assumptions don't hold there:
 One-time setup: create the itch project (kind = HTML, "this file will be played in the
 browser", viewport ~1280×720, fullscreen button on), generate an API key (itch.io →
 Settings → API keys), then add repo secret `BUTLER_API_KEY` and repo **variables**
-`ITCH_TARGET` (e.g. `bibinqyoo/bring-me`) and `PROD_HOST` (e.g. `bringme.<acct>.workers.dev`).
+`ITCH_TARGET` (e.g. `bibinqyoo/bring-me`) and `PROD_HOST` (the canonical domain, `playbringme.com`).
 
 The `itch` job in deploy.yml pushes `client/dist-itch` to the `html5` channel with butler on
 every `v*` tag (after the Worker deploy) or manually via workflow_dispatch.
@@ -104,8 +104,12 @@ catches up. Additive optional fields (like `hello.pub`) don't bump the version a
 - **Smoke test** the URL from two devices (one off-LAN, e.g. phone on data): create a room,
   share the link, play a round. This exercises the same-origin socket, the DO migration, and
   hibernation on real infrastructure for the first time.
-- **Custom domain** (optional): Workers → bringme → Settings → Domains & Routes → add
-  `bringme.bibin.dev`. Same-origin design means zero code changes.
+- **Custom domains** (config-as-code): `routes` in `server/wrangler.toml` — canonical is
+  `playbringme.com` (+ `www`); `bringme.bibin.dev` and workers.dev stay attached so old links
+  keep working. Page loads on legacy hosts 301 to the canonical domain (index.ts); `/room/*`
+  and `/lobby` never redirect — WebSockets can't follow redirects and older itch builds have
+  the old host baked in. The zone must be active on this Cloudflare account before deploying,
+  and `PROD_HOST` should track the canonical domain.
 - **Known sharp edge**: there is no reconnect yet — a refresh mid-match rejoins as a spectator.
   That's the top roadmap item once friends start playing.
 - **Cost watch**: DOs bill for wall-clock duration while awake. The tick interval only runs

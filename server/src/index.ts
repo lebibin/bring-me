@@ -30,6 +30,18 @@ export default {
     // public read-only data — Origin-less is fine, the rate limiter bounds it.
     const readOk = originOk || origin === null;
 
+    // Page loads on legacy hosts (bibin.dev, workers.dev) 301 to the canonical
+    // domain — browsers carry the #/r/CODE fragment across the redirect, so old
+    // invite links land in the right room. Only "/" redirects: /room/* sockets
+    // (redirects would break them) and /lobby stay served on every host.
+    if (url.pathname === "/" && request.method === "GET") {
+      if (env.CANONICAL_HOST && url.host !== env.CANONICAL_HOST) {
+        return Response.redirect(`https://${env.CANONICAL_HOST}/${url.search}`, 301);
+      }
+      if (env.ASSETS) return env.ASSETS.fetch(request);
+      // dev (no assets configured): fall through to the version banner
+    }
+
     if (url.pathname === "/lobby") {
       if (!readOk) return new Response("forbidden origin", { status: 403 });
       if (!(await env.LOBBY_LIMITER.limit({ key: ip })).success) {

@@ -52,12 +52,18 @@ simple = { limit = 120, period = 60 }
 # Kept in an environment so plain `wrangler dev` never requires client/dist.
 [env.production]
 name = "bringme"
-# Custom domain (bibin.dev zone lives on this account): Cloudflare creates the
-# DNS record + cert on deploy. workers_dev keeps the old URL alive for links
-# shared before the domain existed — configuring routes silently disables it
-# otherwise. Invite links in the itch build follow the PROD_HOST repo
-# variable — keep it in sync with this domain.
-routes = [{ pattern = "bringme.bibin.dev", custom_domain = true }]
+# Custom domains (zones live on this account): Cloudflare creates DNS records
+# + certs on deploy. playbringme.com is canonical; bringme.bibin.dev and
+# workers_dev stay attached so links shared before the domain existed keep
+# working (page loads 301 to the canonical host — see index.ts — but /room/*
+# and /lobby never redirect: WebSockets can't follow redirects and older itch
+# builds have the old host baked in). Invite links in the itch build follow
+# the PROD_HOST repo variable — keep it in sync with the canonical domain.
+routes = [
+  { pattern = "playbringme.com", custom_domain = true },
+  { pattern = "www.playbringme.com", custom_domain = true },
+  { pattern = "bringme.bibin.dev", custom_domain = true },
+]
 workers_dev = true
 
 # The exact itch iframe origin must be confirmed on first upload (devtools →
@@ -67,10 +73,15 @@ workers_dev = true
 [env.production.vars]
 ALLOWED_ORIGINS = "https://html-classic.itch.zone,https://html.itch.zone,*.itch.zone"
 ALLOW_NO_ORIGIN = "false"
+CANONICAL_HOST = "playbringme.com"
 
+# "/" runs worker-first so page loads on non-canonical hosts can 301 to the
+# canonical domain; the worker forwards canonical-host loads to this binding.
+# All other asset paths still skip the worker entirely.
 [env.production.assets]
 directory = "../client/dist"
-run_worker_first = ["/room/*", "/lobby"]
+binding = "ASSETS"
+run_worker_first = ["/room/*", "/lobby", "/"]
 
 [[env.production.durable_objects.bindings]]
 name = "ROOM"
