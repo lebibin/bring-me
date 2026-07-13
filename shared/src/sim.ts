@@ -112,8 +112,28 @@ export function stepBallistic(b: Ballistic, dt: number, world?: World): Ballisti
   b.x += b.vx * dt;
   b.y += b.vy * dt;
   b.z += b.vz * dt;
-  const ground = world ? groundHeightAt(world, b.x, b.z, Math.max(b.y, 0), 0.05) : 0;
+  let ground = world ? groundHeightAt(world, b.x, b.z, Math.max(b.y, 0), 0.05) : 0;
   if (b.y <= ground + PROP_REST_Y && b.vy < 0) {
+    if (world) {
+      // Never rest INSIDE a solid fixture (a thrown can perched through the
+      // mower's engine): unless the prop landed on the solid's own top, nudge
+      // it out to the fixture's edge, then re-read the surface there. Swept
+      // a few times — in clusters (playground) one push can enter a neighbour.
+      for (let pass = 0; pass < 4; pass++) {
+        let moved = false;
+        for (const s of world.solids) {
+          if (s.h > 0 && ground >= s.h - 0.01) continue; // resting on its top
+          const min = s.r + 0.25;
+          const d = Math.hypot(b.x - s.x, b.z - s.z) || 0.001;
+          if (d >= min) continue;
+          b.x = s.x + ((b.x - s.x) / d) * min;
+          b.z = s.z + ((b.z - s.z) / d) * min;
+          moved = true;
+        }
+        if (!moved) break;
+      }
+      ground = groundHeightAt(world, b.x, b.z, Math.max(b.y, 0), 0.05);
+    }
     b.y = ground + PROP_REST_Y;
     b.vx = 0;
     b.vy = 0;

@@ -66,7 +66,9 @@ export const THROW_HOLD_MS = 2200;
 export const GRAVITY = 18; // m/s^2, gamey arc
 export const PROP_REST_Y = 0.4; // resting height of a loose prop
 export const CARRY_HEIGHT = 0.95; // carried prop rides at chest height...
-export const CARRY_FORWARD = 0.55; // ...held out in front of the carrier
+// ...held out in front of the carrier — far enough that the biggest prop
+// (basketball r 0.42 at max scale) clears the blob's torso and head
+export const CARRY_FORWARD = 0.8;
 
 // --- Scoring ---
 // Dead simple, party-readable: bring someone's item to the NPC = 1 point;

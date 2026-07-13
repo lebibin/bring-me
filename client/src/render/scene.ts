@@ -554,13 +554,17 @@ function buildPool(scene: THREE.Object3D, pool: RectZone, theme: StageTheme): vo
     }
     return;
   }
-  // shallow-end shimmer patch — barely-there tint, not a floating glass pane
+  // shallow-end shimmer patch — barely-there tint, not a floating glass pane.
+  // depthWrite off + renderOrder after the water: if it wrote depth first the
+  // water behind it got rejected and the patch showed the GROUND through the
+  // pool (a beige/green rectangle "floating" in the water).
   const glint = new THREE.Mesh(
     new THREE.PlaneGeometry(pool.w * 0.6, pool.d * 0.35),
-    new THREE.MeshStandardMaterial({ color: 0x9adcf2, roughness: 0.15, transparent: true, opacity: 0.28 }),
+    new THREE.MeshStandardMaterial({ color: 0x9adcf2, roughness: 0.15, transparent: true, opacity: 0.28, depthWrite: false }),
   );
   glint.rotation.x = -Math.PI / 2;
   glint.position.set(pool.x, 0.143, pool.z + pool.d * 0.2);
+  glint.renderOrder = 1;
   scene.add(glint);
   // ladder
   const lx = pool.x + pool.w / 2 + 0.15;
@@ -572,9 +576,10 @@ function buildPool(scene: THREE.Object3D, pool: RectZone, theme: StageTheme): vo
       const lounger = new THREE.Group();
       lounger.position.set(pool.x + side * (pool.w / 2 + 1.4), 0, pool.z + dz);
       box(lounger, 0.7, 0.18, 1.7, flat(0x3a72b0), 0, 0.35, 0);
-      // backrest hinged at the seat's head end — lower edge tucks into the seat
+      // backrest hinged at the seat's head end — +x tilt buries its lower
+      // edge inside the seat slab, top reclines up past the head end
       const back = box(lounger, 0.7, 0.18, 0.7, flat(0x3a72b0), 0, 0.5, -0.65);
-      back.rotation.x = -0.7;
+      back.rotation.x = 0.7;
       for (const [ly, lz] of [[0.18, 0.6], [0.18, -0.6]] as const) {
         box(lounger, 0.6, 0.35, 0.08, flat(0xf5f2ea), 0, ly, lz);
       }
@@ -664,9 +669,12 @@ function buildPond(scene: THREE.Object3D, pond: { x: number; z: number; r: numbe
   tier2.position.set(pond.x, 0.5, pond.z);
   const jet = new THREE.Mesh(
     new THREE.ConeGeometry(0.16, 0.8, 8),
-    new THREE.MeshStandardMaterial({ color: 0x9fd8f0, roughness: 0.15, transparent: true, opacity: 0.75 }),
+    // depthWrite off: transparent-over-transparent — writing depth first would
+    // punch a hole in the pond water behind it (same bug as the pool glint)
+    new THREE.MeshStandardMaterial({ color: 0x9fd8f0, roughness: 0.15, transparent: true, opacity: 0.75, depthWrite: false }),
   );
   jet.position.set(pond.x, 1.1, pond.z);
+  jet.renderOrder = 1;
   scene.add(tier1, tier2, jet);
 }
 
@@ -903,10 +911,12 @@ function buildMower(scene: THREE.Object3D, m: { x: number; z: number; rot: numbe
     g.add(wheel);
   }
   for (const hx of [-0.2, 0.2]) {
-    const bar = cyl(g, 0.02, 0.02, 1.1, "#4a4d55", hx, 0.75, -0.75, 6);
-    bar.rotation.x = 0.75;
+    // -x tilt leans the bars BACK: bottom ends sink into the deck's rear
+    // (y0.30, z-0.31), top ends meet the grip at (y1.10, z-1.06)
+    const bar = cyl(g, 0.02, 0.02, 1.1, "#4a4d55", hx, 0.7, -0.68, 6);
+    bar.rotation.x = -0.75;
   }
-  box(g, 0.44, 0.04, 0.05, flat(0x4a4d55), 0, 1.2, -1.18); // handle grip
+  box(g, 0.44, 0.04, 0.05, flat(0x4a4d55), 0, 1.1, -1.05); // handle grip
 }
 
 function buildTree(
@@ -1119,12 +1129,14 @@ function buildBed(
     scene.add(sand);
     const clump = new THREE.Group();
     clump.position.set(x - r * 0.25, 0, z);
+    // knee-high tuft, blades splaying OUTWARD (the old 1.1r-tall blades with
+    // inverted lean signs read as a 2m teepee of spears on big beds)
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * Math.PI * 2;
-      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.05 * r, 1.1 * r, 5), flat(i % 2 ? 0x7a9a5a : 0x6a8a4e));
-      blade.position.set(Math.cos(a) * 0.3 * r, 0.5 * r, Math.sin(a) * 0.3 * r);
-      blade.rotation.z = Math.cos(a) * 0.35;
-      blade.rotation.x = -Math.sin(a) * 0.35;
+      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.045 * r, 0.5 * r, 5), flat(i % 2 ? 0x7a9a5a : 0x6a8a4e));
+      blade.position.set(Math.cos(a) * 0.26 * r, 0.22 * r, Math.sin(a) * 0.26 * r);
+      blade.rotation.z = -Math.cos(a) * 0.3;
+      blade.rotation.x = Math.sin(a) * 0.3;
       clump.add(blade);
     }
     scene.add(clump);

@@ -560,9 +560,18 @@ export function generateWorld(seed: number, stage = 0): World {
     ...[-1.8, 1.8].map((px) => ({ ...rotXZ(clothesline.x, clothesline.z, clothesline.rot, px, 0), r: 0.15, h: 0 })),
     ...[-2.6, 2.6].map((lx) => ({ ...rotXZ(px, pz, facing, lx, 0), r: 0.3, h: 0 })),
     { x: mower.x, z: mower.z, r: 0.5, h: 0 },
-    // car collider must cover the rotated body's corners (half-diag ~2.05)
-    { x: car.x, z: car.z, r: 2.0, h: 0.95 },
-    { x: car2.x, z: car2.z, r: 2.0, h: 0.95 },
+    // the sandpit is walk-on but the castle at its center is not (scene.ts
+    // builds it 0.45m out from the pit center, towers included)
+    { x: sandpit.x, z: sandpit.z, r: 0.55, h: 0 },
+    // car body top (h0.95) is standable — collider covers the rotated body's
+    // corners (half-diag ~2.05). The cabin rises to 1.4 above it: a stacked
+    // cap circle over its 1.6x2.0 footprint (half-diag 1.28, local z -0.2)
+    // stops players/props on the body clipping through it; throws still land
+    // on its roof. worldcheck exempts fully-contained raised caps like this.
+    ...[car, car2].flatMap((c) => [
+      { x: c.x, z: c.z, r: 2.0, h: 0.95 },
+      { ...rotXZ(c.x, c.z, c.rot, 0, -0.2), r: 1.28, h: 1.4 },
+    ]),
     { x: shed.x, z: shed.z, r: 1.9, h: 0 }, // pitched roof — no standing
     { x: shed2.x, z: shed2.z, r: 1.9, h: 0 },
     { x: pond.x, z: pond.z, r: pond.r, h: 0 }, // no wading

@@ -47,12 +47,17 @@ for (let s = 1; s <= SEEDS; s++) {
   for (let stage = 0; stage < STAGES.length; stage++) {
     const w = generateWorld(seed, stage);
     const tag = `seed ${seed} stage ${STAGES[stage].id}`;
-    // no two solid fixtures may overlap (objects spawning inside each other)
+    // no two solid fixtures may overlap (objects spawning inside each other) —
+    // EXCEPT a stacked cap: a collider fully contained in a standable solid
+    // with a higher top is the same fixture's raised part (car cabin over the
+    // car body), not two fixtures spawned into each other
     for (let i = 0; i < w.solids.length; i++) {
       for (let j = i + 1; j < w.solids.length; j++) {
         const a = w.solids[i];
         const b = w.solids[j];
         const d = Math.hypot(a.x - b.x, a.z - b.z);
+        const [lo, hi] = a.r >= b.r ? [b, a] : [a, b];
+        if (d + lo.r <= hi.r + 0.05 && hi.h > 0 && lo.h > hi.h) continue;
         if (d < a.r + b.r - 0.05) {
           console.error(`FAIL ${tag}: solids ${i} and ${j} overlap by ${(a.r + b.r - d).toFixed(2)}m`);
           failures++;
