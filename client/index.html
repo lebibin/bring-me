@@ -3,7 +3,60 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bring Me</title>
+    <title>Bring Me — free 3D multiplayer party game</title>
+    <meta
+      name="description"
+      content="Bring Me is a chaotic 3D multiplayer party game. Hide an object, then race your friends to deliver whatever the jumbotron demands. Free, right in your browser."
+    />
+    <link rel="canonical" href="https://playbringme.com/" />
+    <meta name="theme-color" content="#ffd23f" />
+
+    <!-- Favicon + mobile home-screen icons -->
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Open Graph (Discord, Messenger, Facebook, iMessage) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Bring Me" />
+    <meta property="og:title" content="Bring Me — 3D multiplayer party game" />
+    <meta
+      property="og:description"
+      content="Hide an object, then race your friends to deliver whatever the jumbotron demands. Free, right in your browser."
+    />
+    <meta property="og:url" content="https://playbringme.com/" />
+    <meta property="og:image" content="https://playbringme.com/social.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Bring Me — 3D multiplayer party game" />
+
+    <!-- Twitter / X card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Bring Me — 3D multiplayer party game" />
+    <meta
+      name="twitter:description"
+      content="Hide an object, then race your friends to deliver whatever the jumbotron demands."
+    />
+    <meta name="twitter:image" content="https://playbringme.com/social.png" />
+
+    <!-- Structured data: helps Google understand this is a browser game -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "VideoGame",
+        "name": "Bring Me",
+        "url": "https://playbringme.com/",
+        "description": "A chaotic 3D multiplayer party game. Hide an object, then race your friends to deliver whatever the jumbotron demands.",
+        "genre": ["Party", "Multiplayer"],
+        "gamePlatform": "Web Browser",
+        "applicationCategory": "Game",
+        "operatingSystem": "Any (web browser)",
+        "playMode": "MultiPlayer",
+        "image": "https://playbringme.com/social.png",
+        "publisher": { "@type": "Organization", "name": "BIBINQYOO" },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -176,6 +229,31 @@
       }
       #help b { color: var(--accent); }
 
+      /* SEO + loading splash: real crawlable content (h1, how-to, shots) that
+         doubles as the load screen, shown until main.ts adds body.booted.
+         Scrollable so nothing is deceptively hidden from users or crawlers. */
+      #loader {
+        position: fixed; inset: 0; z-index: 40; overflow-y: auto;
+        background: #0e1016; display: flex;
+        align-items: center; justify-content: center; padding: 40px 20px;
+      }
+      body.booted #loader { display: none; }
+      #loader .hero {
+        background: #171a24; border: 3px solid var(--accent); border-radius: 28px;
+        padding: 44px 52px; width: min(760px, 94vw);
+        display: flex; flex-direction: column; gap: 20px; text-align: center;
+      }
+      #loader .wordmark { width: min(420px, 78%); align-self: center; }
+      #loader h1 { font-size: 30px; color: var(--accent); line-height: 1.2; }
+      #loader .lede { font-size: 21px; line-height: 1.5; opacity: 0.92; }
+      #loader h2 { font-size: 20px; color: var(--accent); margin-top: 6px; }
+      #loader ul { list-style: disc; padding-left: 26px; text-align: left; font-size: 18px; line-height: 1.6; }
+      #loader .shots { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      #loader .shots img { width: min(220px, 42vw); border-radius: 10px; border: 1px solid #333a4d; }
+      #loader .loading { font-size: 20px; color: #8892a8; }
+      #loader .loading::after { content: "…"; animation: loaddots 1.2s steps(4, end) infinite; }
+      @keyframes loaddots { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+
       #lobby {
         position: fixed; inset: 0; z-index: 20;
         display: none; align-items: center; justify-content: center;
@@ -267,6 +345,40 @@
     </style>
   </head>
   <body>
+    <!-- Crawlable content + load screen. Hidden once the game boots
+         (main.ts adds body.booted). Keep first in <body> so crawlers that
+         don't run JS still index the real text below. -->
+    <div id="loader">
+      <main class="hero">
+        <img class="wordmark" src="/logo.png" alt="Bring Me" />
+        <h1>Bring Me — a free 3D multiplayer party game</h1>
+        <p class="lede">
+          Everyone hides one object somewhere in a shared 3D world. Each round a
+          jumbotron announces one item, and it's a mad scramble to deliver it to
+          the referee first — walk it over or hurl it across the yard. Deliver
+          someone else's item to score; keep your own hidden to score double.
+        </p>
+        <h2>How to play</h2>
+        <ul>
+          <li><strong>Move</strong> with WASD, <strong>jump</strong> with Space, drag to orbit the camera.</li>
+          <li><strong>Grab</strong> (E), <strong>drop</strong> (G), and <strong>throw</strong> (hold F) objects.</li>
+          <li><strong>Stun</strong> rivals (Q) to make them fumble what they're carrying.</li>
+          <li>Play with friends in seconds — no download, no account, just share a room link.</li>
+        </ul>
+        <div class="shots">
+          <img src="/screenshot-01-backyard-race.png" alt="Players racing to deliver an object across a backyard" loading="lazy" />
+          <img src="/screenshot-02-jumbotron-reveal.png" alt="A jumbotron revealing the object to bring this round" loading="lazy" />
+          <img src="/screenshot-03-city-park.png" alt="Bring Me multiplayer chase through a city park stage" loading="lazy" />
+        </div>
+        <p class="loading">Loading the backyard</p>
+      </main>
+    </div>
+    <noscript>
+      <p style="color:#f2efe6;text-align:center;padding:24px;font-family:sans-serif">
+        Bring Me is a free 3D multiplayer party game that runs in your browser —
+        please enable JavaScript to play.
+      </p>
+    </noscript>
     <div id="app"></div>
     <div id="lobby"></div>
     <div id="topCenter">

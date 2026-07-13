@@ -99,3 +99,8 @@ if (location.hash === "#/sandbox") {
   const autoName = new URLSearchParams(location.search).get("name");
   if (autoName) join(code ?? newCode(), autoName);
 }
+
+// The interactive UI (sandbox game or lobby) is now up — drop the SEO/load
+// splash. Content stayed in the initial HTML for crawlers; users saw it while
+// the bundle loaded.
+document.body.classList.add("booted");
