@@ -18,6 +18,17 @@ enabled = true
 [observability.logs]
 head_sampling_rate = 1
 
+# Workers Traces: automatic span instrumentation (no SDK/code changes) for the
+# fetch/alarm handlers, ROOM/LOBBY DO binding calls, and DO-side storage/alarm
+# ops — same dashboard tab as Logs. CAUTION: every WebSocket message is a
+# hibernation invocation, so a busy 15 Hz room emits far more trace events than
+# log lines, and traces SHARE the logs quota. Dev traffic is negligible, so
+# sample everything here; production samples down (see env.production) — keep
+# the two rates intentional, not accidentally divergent.
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+
 # One Durable Object per room code keeps every player in a room on the same
 # instance — the DO is the authoritative game server (adapted from
 # salpakan/infra/signal, upgraded from 2-seat relay to N-seat authority).
@@ -92,6 +103,17 @@ enabled = true
 
 [env.production.observability.logs]
 head_sampling_rate = 1
+
+# Traces sampled to 1% in production — the sensible floor. Traces and logs
+# share ONE quota, and logs (the structured `event` stream in src/log.ts) are
+# the primary debugging surface; traces are the secondary latency/span view.
+# 1% keeps a statistical sample for spotting patterns (slow storage calls,
+# alarm latency) while costing the logs budget almost nothing. Bump temporarily
+# toward 1 when actively investigating a latency issue — it's a redeploy, not a
+# code change. (Any lower and you may as well set enabled = false.)
+[env.production.observability.traces]
+enabled = true
+head_sampling_rate = 0.01
 
 # "/" runs worker-first so page loads on non-canonical hosts can 301 to the
 # canonical domain; the worker forwards canonical-host loads to this binding.
